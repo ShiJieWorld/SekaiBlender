@@ -4,14 +4,15 @@
   <p><strong>MMD-native workflows for Blender.</strong><br>
   PMX/VMD assets, animation, IK, physics and rendering in one Windows build.</p>
   <p>
-    <a href="https://github.com/ShiJieWorld/SekaiBlender"><img src="https://img.shields.io/badge/status-source_snapshot-7c3aed?style=flat-square" alt="Source snapshot"></a>
+    <a href="https://github.com/ShiJieWorld/SekaiBlender/releases/latest"><img src="https://img.shields.io/github/v/release/ShiJieWorld/SekaiBlender?style=flat-square&display_name=release&label=release&color=16a34a" alt="Latest release"></a>
     <a href="https://github.com/ShiJieWorld/SekaiBlender/blob/main/COPYING"><img src="https://img.shields.io/badge/license-GPL--2.0%2B-2563eb?style=flat-square" alt="GPL-2.0+"></a>
-    <img src="https://img.shields.io/badge/platform-Windows-f97316?style=flat-square" alt="Windows">
+    <img src="https://img.shields.io/badge/platform-Windows_x64-f97316?style=flat-square" alt="Windows x64">
     <img src="https://img.shields.io/badge/Blender-5.3-2563eb?style=flat-square" alt="Blender 5.3">
   </p>
 </div>
 
 <p align="center">
+  <a href="#download">Download</a> ·
   <a href="#feature-set">Features</a> ·
   <a href="#build-on-windows">Build</a> ·
   <a href="#known-limits">Known limits</a> ·
@@ -19,6 +20,16 @@
 </p>
 
 > SekaiBlender is a source-level Blender branch for MMD creators. It is a standalone application, not an add-on, and it does not replace an existing Blender installation.
+
+## Download
+
+A prebuilt Windows x64 package is published on the [Releases](https://github.com/ShiJieWorld/SekaiBlender/releases/latest) page, so building from source is optional.
+
+1. Download `sekaiblender-1.0-git.<hash>-windows64.zip` (about 329 MB) from the latest release.
+2. Extract it anywhere. No installer and no administrator rights are required.
+3. Run `SekaiBlender-launcher.exe` from the extracted folder. Use `SekaiBlender.exe` directly if you want the console window attached.
+
+Keep the extracted folder intact: the executables load the `5.3` runtime directory that sits next to them.
 
 ## At A Glance
 
