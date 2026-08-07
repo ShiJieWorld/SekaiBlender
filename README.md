@@ -1,84 +1,128 @@
-# SekaiBlender 1.0
+<div align="center">
+  <img src="release/windows/msix/Assets/StoreLogo.scale-400.png" width="180" alt="SekaiBlender icon">
+  <h1>SekaiBlender</h1>
+  <p><strong>MMD-native workflows for Blender.</strong><br>
+  PMX/VMD assets, animation, IK, physics and rendering in one Windows build.</p>
+  <p>
+    <a href="https://github.com/ShiJieWorld/SekaiBlender"><img src="https://img.shields.io/badge/status-source_snapshot-7c3aed?style=flat-square" alt="Source snapshot"></a>
+    <a href="https://github.com/ShiJieWorld/SekaiBlender/blob/main/COPYING"><img src="https://img.shields.io/badge/license-GPL--2.0%2B-2563eb?style=flat-square" alt="GPL-2.0+"></a>
+    <img src="https://img.shields.io/badge/platform-Windows-f97316?style=flat-square" alt="Windows">
+    <img src="https://img.shields.io/badge/Blender-5.3-2563eb?style=flat-square" alt="Blender 5.3">
+  </p>
+</div>
 
-**MMD 特化版 Blender** — 在 Blender 内原生承接 PMX/VMD 资产、角色动画与实时物理的独立分支。
+<p align="center">
+  <a href="#feature-set">Features</a> ·
+  <a href="#build-on-windows">Build</a> ·
+  <a href="#known-limits">Known limits</a> ·
+  <a href="#contributing">Contributing</a>
+</p>
 
-基于 Blender 主线源码深度定制，面向 MMD（MikuMikuDance）创作者，提供从模型导入、动作编辑、物理模拟到最终渲染的完整工作流。
+> SekaiBlender is a source-level Blender branch for MMD creators. It is a standalone application, not an add-on, and it does not replace an existing Blender installation.
 
----
+## At A Glance
 
-## 核心能力
+| Workflow | Included |
+| --- | --- |
+| **PMX** | Native import and export, materials, UVs, morphs, bones, rigid bodies and joints |
+| **VMD** | Bone, morph and camera animation with Bezier interpolation |
+| **IK** | Native CCD V8 solver with PMX schema 1/2 support and angle limits |
+| **Physics** | Realtime Bullet preview, multi-model scenes and deterministic Action Bake |
+| **Viewport** | MMD toon outlines, EEVEE workflows and AMD FSR 1.0 upscaling |
 
-### 资产管线
-- **PMX 2.0 导入** — 完整解析骨骼（IK/追加/轴约束）、网格（BDEF/SDEF 蒙皮）、材质、UV、顶点 Morph（Shape Key + Driver）、Group Morph、Display Frame
-- **PMX 2.0 导出** — 往返保真导出：模型信息、顶点、面、纹理、材质、骨骼、Morph、Display Frame、刚体、关节，已通过真实模型逐字段验证
+## Feature Set
 
-### 动画系统
-- **VMD 导入** — 骨骼 Action（位置/四元数/Bezier 插值）、Morph Action（顶点/Group/Bone/Flip/Impulse）、Camera Action
-- **VMD 导出** — 骨骼 Action（线性/Bezier）、Camera Action（逐通道 Bezier 无损往返）
-- **原生 CCD IK** — V8 求解器，兼容 PMX IK 定义 schema 1/2，角度限制
+### PMX Asset Pipeline
 
-### 物理引擎
-- **实时物理预览** — 帧权威重建、多模型同场景、Bullet 独立世界、120Hz 子步
-- **离线物理烘焙** — 完整 Action Bake，modal 进度/取消恢复、NLA 兼容
-- **物理诊断** — 快照采样、穿透检测、收敛追踪
+- PMX 2.0 import for BDEF/SDEF skinning, IK, append transforms, axis limits, materials, UVs, morphs and display frames.
+- PMX export for imported models, including source retention, vertex morph offsets, physics definitions and packaged textures.
+- Round-trip validation against real PMX models with field-by-field comparison across all 11 major sections.
 
-### 视觉增强
-- **AMD FSR 1.0** — EASU/RCAS 视口超分，四档质量预设
-- **MMD 描边预览** — PMX edge_flag/edge_size 驱动的 toon 描边
-- **EEVEE 渲染** — 自适应阴影池、中文界面、30 FPS 默认时间线
+### Animation And Camera
 
----
+- VMD bone and morph Actions with position, quaternion and Bezier interpolation.
+- Native VMD camera import and export with perspective/orthographic support.
+- Camera rig export preserves per-channel Bezier curves when the source uses the supported rig layout.
 
-## 构建（Windows）
+### Realtime Physics
 
-### 依赖
-- Visual Studio 2022（MSVC v143+）
-- CMake 3.21+
-- Python 3.11（嵌入用）
-- CUDA Toolkit（可选，GPU 渲染加速）
-- OptiX SDK（可选）
+- Frame-authoritative realtime preview with independent Bullet worlds per model.
+- Multiple MMD models in the same Scene.
+- F8 Action Bake with progress, cancellation recovery, NLA validation and provenance metadata.
 
-### 步骤
+### Rendering And Look Development
 
-```bash
-# 1. 进入源码目录
+- MMD edge preview driven by PMX `edge_flag` and `edge_size`.
+- AMD FSR 1.0 EASU/RCAS quality presets for the EEVEE viewport and renders.
+- SekaiBlender branding, Chinese UI defaults and a 30 FPS startup timeline.
+
+## Verified Workflows
+
+| Check | Result |
+| --- | --- |
+| PMX / VMD / Blender kernel tests | 3/3 CTest suites passing |
+| PMX, MMD and VMD direct tests | 170 passed, 11 environment-gated skips, 0 failed |
+| PMX export round-trip | 2 real PMX models, all 11 sections matched |
+| VMD camera round-trip | Real 27-frame sample, zero resampling error |
+
+## Build On Windows
+
+### Requirements
+
+- Visual Studio 2022 with MSVC v143 or newer
+- CMake 3.21 or newer
+- Python 3.11 for the embedded runtime
+- Git LFS and Git submodules
+- CUDA Toolkit and OptiX SDK are optional GPU acceleration dependencies
+
+### Clone
+
+```powershell
+git clone --recurse-submodules https://github.com/ShiJieWorld/SekaiBlender.git
 cd SekaiBlender
-
-# 2. 配置（Release + GPU）
-cmake -B ../build -G "Visual Studio 17 2022" ^
-  -DCMAKE_BUILD_TYPE=Release ^
-  -DWITH_CYCLES_CUDA_BINARIES=ON ^
-  -DWITH_CYCLES_DEVICE_OPTIX=ON
-
-# 3. 构建
-cmake --build ../build --config Release --target INSTALL
-
-# 4. 运行
-../build/bin/Release/SekaiBlender.exe
+git lfs install
+git lfs pull
+git submodule update --init --recursive
 ```
 
-> **注意**：SekaiBlender 基于 Blender 主线深度修改，并非插件。构建产物为独立可执行程序，与官方 Blender 不冲突。
+The repository uses Git LFS for Blender test assets and other binary resources. The initial LFS download is large.
 
----
+### Configure, Build And Run
 
-## 与官方 Blender 的关系
+```powershell
+cmake -S . -B ..\build -G "Visual Studio 17 2022" -A x64 `
+  -DWITH_CYCLES_CUDA_BINARIES=ON `
+  -DWITH_CYCLES_DEVICE_OPTIX=ON
 
-SekaiBlender 是 Blender 的 GPL 兼容分支：
-- 上游同步自 [blender/blender](https://projects.blender.org/blender/blender) 主线
-- 所有修改位于独立的 `main` 分支
-- 遵循 GPL v2+ 许可证
+cmake --build ..\build --config Release --target INSTALL
+..\build\bin\Release\SekaiBlender.exe
+```
 
----
+For a CPU-only build, omit the CUDA and OptiX options. The `INSTALL` target is intentional: it refreshes the runtime `5.3/scripts` tree used by the packaged executable.
 
-## 许可证
+## Known Limits
 
-本项目继承 Blender 的 [GNU General Public License v2.0 或更高版本](https://www.gnu.org/licenses/gpl-2.0.html)。
+- VMD light and self-shadow frames are not imported or exported.
+- PMX Bone, UV, Material, Flip and Impulse Morph data do not all map to active Blender effects yet.
+- PMX export currently accepts models imported by SekaiBlender with source-retention data; arbitrary native Blender meshes are rejected rather than exported with guessed semantics.
+- Realtime physics sessions are independent per model within one Scene. Different Scenes cannot own simultaneous global realtime schedulers.
+
+## Project Status
+
+This GitHub `main` branch is an intentionally history-trimmed source snapshot. It contains the complete current source tree and SekaiBlender modifications, while the upstream Blender commit history is kept out of this public snapshot to keep the repository practical to clone and maintain.
+
+## Contributing
+
+Bug reports and focused pull requests are welcome. For changes to PMX, VMD, IK or physics, include the smallest reproducible asset or test case available and describe the expected Blender-side result.
+
+## License And Upstream
+
+SekaiBlender is a GPL-compatible Blender branch. It inherits the [GNU General Public License v2.0 or later](https://www.gnu.org/licenses/gpl-2.0.html).
+
+- Upstream Blender: [blender/blender](https://projects.blender.org/blender/blender)
+- Blender website: [blender.org](https://www.blender.org)
+- PMX format reference: [PMX format notes](https://gist.github.com/felixjones/f8a06bd48f9da44a1cc9b71c14f0f3b5)
 
 Copyright (C) 2024-2026 世界的歌 (ShiJieWorld) and Blender Foundation.
 
----
-
-## 链接
-
-- Blender 官方: https://www.blender.org
-- PMX 格式规范（非官方）: https://gist.github.com/felixjones/f8a06bd48f9da44a1cc9b71c14f0f3b5
+<p align="center"><sub>Built for creators who bring MMD worlds to life.</sub></p>
