@@ -1734,6 +1734,7 @@ if(WITH_UI_TESTS)
     test_undo.text_editor_simple
     test_undo.view3d_edit_mode_multi_window
     test_undo.view3d_font_edit_mode_simple
+    test_undo.view3d_mesh_edit_shape_key
     test_undo.view3d_mesh_edit_separate
     test_undo.view3d_mesh_particle_edit_mode_simple
     test_undo.view3d_multi_mode_multi_window
@@ -1765,6 +1766,16 @@ if(WITH_UI_TESTS)
     test_render.interactive_rendering_eevee
     test_render.animation_rendering_and_player
     test_bpy_types.unregister_referenced_type
+    test_sequencer.compositor_modifier_mask_with_single_input
+    test_menu_search_and_exec.view3d_add
+    test_menu_search_and_exec.modifier_add
+    test_menu_search_and_exec.sequencer_add
+    test_menu_search_and_exec.sequencer_modifier_add
+    test_menu_search_and_exec.shader_node_add
+    test_menu_search_and_exec.compositor_node_add
+    test_menu_search_and_exec.geometry_node_add
+    test_menu_search_and_exec.node_swap_search
+    test_menu_search_and_exec.grease_pencil_layer_search
     test_pie_menus.test_object_mode_pie_edit
     test_pie_menus.test_snap_pie_cursor_to_world_origin
     test_pie_menus.test_pivot_pie_cursor
@@ -1792,6 +1803,10 @@ if(WITH_UI_TESTS)
     test_pie_menus.test_anim_keyframe_insert_pie_location
     test_pie_menus.test_weight_paint_vgroup_lock_pie
     test_button_input.test_string_buttons_interactions
+    test_tool_activation.view3d
+    test_tool_activation.image_editor
+    test_tool_activation.node_editor
+    test_tool_activation.sequencer
   )
   foreach(ui_test ${_ui_tests})
     add_blender_test_ui(
