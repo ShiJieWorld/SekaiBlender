@@ -2749,6 +2749,9 @@ struct SceneEEVEE {
   float light_threshold = 0.01f;
   float fsr_sharpness = 0.2f;
   eSceneEEVEE_FSRQuality fsr_quality = SCE_EEVEE_FSR_QUALITY_PERFORMANCE;
+
+  float time_limit = 0.0f;
+  char _pad2[12] = {};
 };
 
 struct SceneGpencil {
