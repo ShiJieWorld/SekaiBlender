@@ -1774,6 +1774,8 @@ class EXTENSIONS_OT_repo_refresh_all(Operator):
                 # NOTE: this isn't a problem as the callback isn't stored.
                 # pylint: disable-next=cell-var-from-loop
                 error_fn=lambda ex: self._exceptions_as_report(repo_item.name, ex),
+                # [世界的歌] A default user repository may not exist until the first extension is installed.
+                ignore_missing=True,
             )
 
         # Ensure module cache is removed, especially module cache that has marked a module as missing.
