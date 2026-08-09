@@ -380,8 +380,7 @@ class VMDActionContractTest : public bke::BlenderGTestBase {
     }
     FCurve *found = nullptr;
     animrig::foreach_fcurve_in_action(anim_data->action->wrap(), [&](FCurve &fcurve) {
-      if (found == nullptr && fcurve.array_index == array_index &&
-          std::string(fcurve.rna_path ? fcurve.rna_path : "") == path) {
+      if (found == nullptr && fcurve.array_index == array_index && fcurve.rna_path() == path) {
         found = &fcurve;
       }
     });

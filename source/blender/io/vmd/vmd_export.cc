@@ -321,13 +321,13 @@ bool collect_morph_tracks(const Object &controller,
   for (const FCurve *curve :
        animrig::fcurves_for_action_slot(anim_data->action->wrap(), anim_data->slot_handle))
   {
-    if (curve == nullptr || curve->rna_path == nullptr || curve->array_index != 0) {
+    if (curve == nullptr || curve->rna_path().is_empty() || curve->array_index != 0) {
       continue;
     }
     char morph_name[MAX_NAME] = {};
     if (!BLI_str_quoted_substr(
-            curve->rna_path, "key_blocks[", morph_name, sizeof(morph_name)) ||
-        !std::string(curve->rna_path).ends_with("].value"))
+            curve->rna_path().c_str(), "key_blocks[", morph_name, sizeof(morph_name)) ||
+        !curve->rna_path().endswith("].value"))
     {
       continue;
     }
@@ -427,10 +427,10 @@ const FCurve *find_id_fcurve(const ID &id, const char *rna_path, const int array
   for (const FCurve *curve :
        animrig::fcurves_for_action_slot(anim_data->action->wrap(), anim_data->slot_handle))
   {
-    if (curve == nullptr || curve->rna_path == nullptr || curve->array_index != array_index) {
+    if (curve == nullptr || curve->rna_path().is_empty() || curve->array_index != array_index) {
       continue;
     }
-    if (std::strcmp(curve->rna_path, rna_path) == 0) {
+    if (curve->rna_path() == rna_path) {
       return curve;
     }
   }
@@ -728,12 +728,12 @@ bool export_vmd_action(const Object &armature,
   std::string frame_error;
   bke::BKE_action_find_fcurves_with_bones(
       anim_data->action, anim_data->slot_handle, [&](const FCurve *curve, const char *bone_name) {
-        if (curve == nullptr || curve->rna_path == nullptr || bone_name == nullptr) {
+        if (curve == nullptr || curve->rna_path().is_empty() || bone_name == nullptr) {
           return;
         }
         ExportBoneTrack &track = tracks[bone_name];
         track.name = bone_name;
-        const std::string path = curve->rna_path;
+        const std::string path = curve->rna_path().c_str();
         if (path.ends_with("].location") && curve->array_index >= 0 && curve->array_index < 3) {
           track.location[curve->array_index] = curve;
         }

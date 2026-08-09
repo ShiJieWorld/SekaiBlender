@@ -374,10 +374,10 @@ int mute_physics_bone_action_curves(MMDPhysicsRuntimeSession &session, Object &a
 
   animrig::foreach_fcurve_in_action(anim_data->action->wrap(), [&](FCurve &fcurve) {
     constexpr const char *prefix = "pose.bones[\"";
-    if (fcurve.rna_path == nullptr || !STRPREFIX(fcurve.rna_path, prefix)) {
+    if (fcurve.rna_path().is_empty() || !STRPREFIX(fcurve.rna_path().c_str(), prefix)) {
       return;
     }
-    const char *name_begin = fcurve.rna_path + std::strlen(prefix);
+    const char *name_begin = fcurve.rna_path().c_str() + std::strlen(prefix);
     const char *name_end = std::strstr(name_begin, "\"].");
     if (name_end == nullptr) {
       return;
@@ -400,7 +400,7 @@ int mute_physics_bone_action_curves(MMDPhysicsRuntimeSession &session, Object &a
     }
     session.muted_action_curves.append({anim_data->action->id.session_uid,
                                         anim_data->slot_handle,
-                                        fcurve.rna_path,
+                                        fcurve.rna_path().c_str(),
                                         fcurve.array_index,
                                         (fcurve.flag & FCURVE_MUTED) != 0});
     fcurve.flag |= FCURVE_MUTED;
@@ -450,10 +450,10 @@ int restore_unanimated_physics_bones(Object &armature, const Set<std::string> &p
   if (anim_data != nullptr && anim_data->action != nullptr) {
     animrig::foreach_fcurve_in_action(anim_data->action->wrap(), [&](FCurve &fcurve) {
       constexpr const char *prefix = "pose.bones[\"";
-      if (fcurve.rna_path == nullptr || !STRPREFIX(fcurve.rna_path, prefix)) {
+      if (fcurve.rna_path().is_empty() || !STRPREFIX(fcurve.rna_path().c_str(), prefix)) {
         return;
       }
-      const char *name_begin = fcurve.rna_path + std::strlen(prefix);
+      const char *name_begin = fcurve.rna_path().c_str() + std::strlen(prefix);
       const char *name_end = std::strstr(name_begin, "\"]");
       if (name_end != nullptr) {
         animated_bones.add(std::string(name_begin, name_end));
@@ -2707,19 +2707,19 @@ bool physics_bake_action_begin(Main &bmain,
   }
 
   const auto is_replaced_curve = [&](const FCurve &fcurve) {
-    if (fcurve.rna_path == nullptr) {
+    if (fcurve.rna_path().is_empty()) {
       return false;
     }
     for (const PhysicsBakeTrack &track : tracks) {
-      if (STREQ(fcurve.rna_path, track.rotation_path.c_str()) ||
-          STREQ(fcurve.rna_path, track.rotation_euler_path.c_str()) ||
-          STREQ(fcurve.rna_path, track.rotation_axis_angle_path.c_str()))
+      if (STREQ(fcurve.rna_path().c_str(), track.rotation_path.c_str()) ||
+          STREQ(fcurve.rna_path().c_str(), track.rotation_euler_path.c_str()) ||
+          STREQ(fcurve.rna_path().c_str(), track.rotation_axis_angle_path.c_str()))
       {
         return true;
       }
       if (track.full_transform &&
-          (STREQ(fcurve.rna_path, track.location_path.c_str()) ||
-           STREQ(fcurve.rna_path, track.scale_path.c_str())))
+          (STREQ(fcurve.rna_path().c_str(), track.location_path.c_str()) ||
+           STREQ(fcurve.rna_path().c_str(), track.scale_path.c_str())))
       {
         return true;
       }

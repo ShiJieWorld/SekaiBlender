@@ -194,7 +194,7 @@ class MmdCCDIKEvalTest : public bke::BlenderGTestBase {
     BLI_str_escape(escaped_name, ik_bone_name, sizeof(escaped_name));
     const std::string path = std::string("pose.bones[\"") + escaped_name + "\"].mmd_ik_toggle";
     FCurve *fcurve = BKE_fcurve_create();
-    fcurve->rna_path = BLI_strdup(path.c_str());
+    fcurve->rna_path_set(path);
     fcurve->array_index = 0;
     fcurve->totvert = 1;
     fcurve->bezt = MEM_new_zeroed<BezTriple>("toggle bezier");
