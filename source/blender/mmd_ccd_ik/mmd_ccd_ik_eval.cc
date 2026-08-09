@@ -348,7 +348,7 @@ static bool v8_read_action_rotation(const Object &armature_obj,
     bool found = false;
     const std::string path = prefix + property;
     for (const FCurve *fcurve : fcurves) {
-      if (fcurve != nullptr && fcurve->rna_path != nullptr && path == fcurve->rna_path &&
+      if (fcurve != nullptr && !fcurve->rna_path().is_empty() && fcurve->rna_path() == path &&
           fcurve->array_index >= 0 && fcurve->array_index < component_count)
       {
         values[fcurve->array_index] = evaluate_fcurve_only_curve(fcurve, eval_time);

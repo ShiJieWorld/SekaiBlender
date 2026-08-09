@@ -131,8 +131,7 @@ class VMDMorphActionTest : public bke::BlenderGTestBase {
     }
     FCurve *found = nullptr;
     animrig::foreach_fcurve_in_action(adt->action->wrap(), [&](FCurve &fcurve) {
-      if (found == nullptr && fcurve.array_index == 0 &&
-          std::string(fcurve.rna_path ? fcurve.rna_path : "") == path) {
+      if (found == nullptr && fcurve.array_index == 0 && fcurve.rna_path() == path) {
         found = &fcurve;
       }
     });

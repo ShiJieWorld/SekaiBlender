@@ -234,10 +234,10 @@ static bool bone_has_rotation_fcurve(const bAction &action,
         continue;
       }
       for (const FCurve *fc : cbag->fcurves()) {
-        if (fc->rna_path == nullptr) {
+        if (fc->rna_path().is_empty()) {
           continue;
         }
-        if (strncmp(fc->rna_path, prefix.c_str(), prefix.size()) != 0) {
+        if (strncmp(fc->rna_path().c_str(), prefix.c_str(), prefix.size()) != 0) {
           continue;
         }
         /* A single keyframe (or several identical ones) is a placeholder,
@@ -283,10 +283,10 @@ static bool action_has_ik_toggle_fcurves(const bAction &action, const AnimData &
         continue;
       }
       for (const FCurve *fc : cbag->fcurves()) {
-        if (fc->rna_path == nullptr) {
+        if (fc->rna_path().is_empty()) {
           continue;
         }
-        if (strstr(fc->rna_path, ".mmd_ik_toggle") != nullptr) {
+        if (strstr(fc->rna_path().c_str(), ".mmd_ik_toggle") != nullptr) {
           return true;
         }
       }

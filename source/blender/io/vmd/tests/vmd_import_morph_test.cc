@@ -331,8 +331,7 @@ TEST_F(VMDImportMorphTest, group_raw_channel_driven_by_vmd)
   bool found_group_curve = false;
   animrig::foreach_fcurve_in_action(morph_anim_data->action->wrap(),
                                     [&](const FCurve &fcurve) {
-                                      if (fcurve.rna_path != nullptr &&
-                                          strstr(fcurve.rna_path, "GroupA") != nullptr) {
+                                      if (strstr(fcurve.rna_path().c_str(), "GroupA") != nullptr) {
                                         found_group_curve = true;
                                       }
                                     });
