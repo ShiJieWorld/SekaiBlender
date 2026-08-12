@@ -474,6 +474,13 @@ Material *create_pmx_material(PMXImportContext &ctx, const PMXModel &model, cons
   material->g = pmx_material.diffuse[1];
   material->b = pmx_material.diffuse[2];
   material->a = pmx_material.diffuse[3];
+
+  /* PMX's material double-sided flag maps to Blender's backface culling. The
+   * transparent overlay fix only controls which transparent layers are shown;
+   * it must not replace the source material's face-sidedness rule. */
+  if ((pmx_material.flag & PMX_MATERIAL_FLAG_DOUBLE_SIDED) == 0) {
+    material->blend_flag |= MA_BL_CULL_BACKFACE;
+  }
   write_pmx_edge_data(*material, pmx_material);
 
   Image *base_texture = load_texture(ctx, pmx_material, pmx_material.texture_idx, "base");
