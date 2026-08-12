@@ -92,6 +92,9 @@ void create_mesh_object(PMXImportContext &ctx, PMXModel &model);
 /** Create the unified Empty root for one imported PMX model. */
 Object *create_model_root(PMXImportContext &ctx, const PMXModel &model);
 
+/** Mark later PMX materials that contain coincident triangles, regardless of winding. */
+Vector<bool> find_overlapping_materials(const PMXModel &model, float global_scale);
+
 /**
  * Transform PMX coordinates (Y-up, cm) to Blender coordinates (Z-up, m).
  * Mapped as: Blender X=PMX X, Blender Y=PMX Z, Blender Z=PMX Y.

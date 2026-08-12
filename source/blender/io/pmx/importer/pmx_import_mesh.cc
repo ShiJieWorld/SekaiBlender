@@ -90,6 +90,9 @@ static PMXTriangleKey make_triangle_key(const PMXModel &model,
     }
   }
 
+  /* Match mmd_tools: the overlap fix is based on coincident positions, not
+   * polygon winding. PMX highlight layers can use the opposite winding while
+   * still being the same screen-space overlay. */
   std::sort(vertices.begin(), vertices.end());
   PMXTriangleKey key{};
   int key_index = 0;
@@ -101,7 +104,7 @@ static PMXTriangleKey make_triangle_key(const PMXModel &model,
   return key;
 }
 
-static Vector<bool> find_overlapping_materials(const PMXModel &model, const float global_scale)
+Vector<bool> find_overlapping_materials(const PMXModel &model, const float global_scale)
 {
   Vector<bool> result(model.materials.size(), false);
   std::map<PMXTriangleKey, int> first_material_by_triangle;

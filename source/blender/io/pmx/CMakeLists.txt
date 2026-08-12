@@ -108,6 +108,7 @@ if(WITH_GTESTS)
     tests/pmx_bone_axis_test.cc
     tests/pmx_pose_snapshot_test.cc
     tests/pmx_import_weights_test.cc
+    tests/pmx_material_overlap_test.cc
     tests/pmx_model_diff_test.cc
     tests/pmx_normal_fidelity_test.cc
     tests/pmx_round_trip_test.cc
