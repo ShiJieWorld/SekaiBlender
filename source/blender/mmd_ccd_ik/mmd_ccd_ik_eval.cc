@@ -1004,6 +1004,23 @@ void mmd_ccd_ik_evaluate(Depsgraph *depsgraph, Object *armature_obj)
     return;
   }
 
+  /* Rigify POSE 模式开关：Python 侧 wire_pose_mode() 在接线时设置
+   * armature_obj['mmd_native_ik_override'] = True，使 V8/V2 CCD 求解器
+   * 不在 COPY 约束之后覆盖腿部链（否则 foot_ik 抬不起脚后跟、torso 蹲下弹回）。
+   * 切换回 PLAYBACK 模式时删除该属性或设为 False 即可恢复原生 IK。*/
+  if (armature_obj->id.properties != nullptr) {
+    IDProperty *override_prop = IDP_GetPropertyFromGroup_null(
+        armature_obj->id.properties, "mmd_native_ik_override");
+    if (override_prop != nullptr) {
+      const bool overridden =
+          (override_prop->type == IDP_BOOLEAN && IDP_bool_get(override_prop)) ||
+          (override_prop->type == IDP_INT && IDP_int_get(override_prop) != 0);
+      if (overridden) {
+        return;
+      }
+    }
+  }
+
   /* 1. Read IK definition from armature's system properties. */
   IDProperty *def_group = IDP_GetPropertyFromGroup_null(
       armature_obj->id.system_properties, kIKDefinitionProp);
