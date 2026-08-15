@@ -12,6 +12,7 @@
 #include "BKE_armature.hh"
 #include "BKE_context.hh"
 #include "BKE_file_handler.hh"
+#include "BKE_idprop.hh"
 #include "BKE_layer.hh"
 #include "BKE_lib_id.hh"
 #include "BKE_main.hh"
@@ -462,6 +463,51 @@ static int vmd_suspend_mmd_approx_constraints(Main *bmain, Object *ob)
   return suspended;
 }
 
+static bool vmd_is_rigify_bridge_armature(const Object &object)
+{
+  if (object.type != OB_ARMATURE) {
+    return false;
+  }
+  if (object.id.properties != nullptr &&
+      IDP_GetPropertyFromGroup_null(object.id.properties, "mmd_rigify_mode") != nullptr)
+  {
+    return true;
+  }
+  if (object.pose == nullptr) {
+    return false;
+  }
+  for (const bPoseChannel *pchan = static_cast<const bPoseChannel *>(object.pose->chanbase.first);
+       pchan != nullptr;
+       pchan = pchan->next)
+  {
+    for (const bConstraint *constraint = static_cast<const bConstraint *>(
+             pchan->constraints.first);
+         constraint != nullptr;
+         constraint = constraint->next)
+    {
+      if (strncmp(constraint->name, "MMR_", 4) == 0) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+static Object *vmd_find_rigify_source(Main *bmain, const Object *active)
+{
+  if (active == nullptr || strncmp(active->id.name + 2, "RIG-", 4) != 0) {
+    return nullptr;
+  }
+  for (Object *object = static_cast<Object *>(bmain->objects.first); object != nullptr;
+       object = static_cast<Object *>(object->id.next))
+  {
+    if (object != active && vmd_is_rigify_bridge_armature(*object)) {
+      return object;
+    }
+  }
+  return nullptr;
+}
+
 static Object *vmd_resolve_target(bContext *C, wmOperator *op, Main *bmain)
 {
   int target_value = 0;
@@ -473,6 +519,14 @@ static Object *vmd_resolve_target(bContext *C, wmOperator *op, Main *bmain)
   if (target_value <= 0) {
     Object *active = CTX_data_active_object(C);
     if (active != nullptr && active->type == OB_ARMATURE) {
+      if (Object *source = vmd_find_rigify_source(bmain, active)) {
+        BKE_reportf(op->reports,
+                    RPT_INFO,
+                    "Active Rigify armature '%s'; using linked MMD VMD target '%s'",
+                    active->id.name + 2,
+                    source->id.name + 2);
+        return source;
+      }
       return active;
     }
     for (Object *ob = static_cast<Object *>(bmain->objects.first); ob != nullptr;
@@ -503,6 +557,51 @@ static Object *vmd_resolve_target(bContext *C, wmOperator *op, Main *bmain)
     ordinal++;
   }
   return nullptr;
+}
+
+/* A generated MMD -> Rigify scene keeps the VMD Action on the original MMD
+ * armature.  Its MMR_* constraints are the reverse (Rigify -> MMD) direction,
+ * so they must yield while that Action is playing.  The Python bridge creates
+ * the mode property and drivers; this small editor-side switch makes VMD
+ * import enter PLAYBACK automatically. */
+static bool vmd_activate_rigify_playback_mode(Main *bmain, Object &target, ReportList *reports)
+{
+  if (!vmd_is_rigify_bridge_armature(target)) {
+    return false;
+  }
+
+  IDProperty *properties = IDP_EnsureProperties(&target.id);
+  IDProperty *mode = IDP_GetPropertyTypeFromGroup(properties, "mmd_rigify_mode", IDP_FLOAT);
+  if (mode != nullptr) {
+    IDP_float_set(mode, 1.0f);
+  }
+  else {
+    if (IDProperty *old = IDP_GetPropertyFromGroup_null(properties, "mmd_rigify_mode")) {
+      IDP_FreeFromGroup(properties, old);
+    }
+    IDP_AddToGroup(properties, blender::bke::idprop::create("mmd_rigify_mode", 1.0f).release());
+  }
+
+  /* The Rigify bridge disables the native MMD CCD solver in POSE mode.  VMD
+   * playback must restore it so IK toggle tracks and mixed FK/IK motions work.
+   */
+  if (IDProperty *override_prop = IDP_GetPropertyFromGroup_null(
+          properties, "mmd_native_ik_override"))
+  {
+    if (override_prop->type == IDP_BOOLEAN) {
+      IDP_bool_set(override_prop, false);
+    }
+    else if (override_prop->type == IDP_INT) {
+      IDP_int_set(override_prop, 0);
+    }
+  }
+
+  DEG_id_tag_update_ex(bmain, &target.id, ID_RECALC_ANIMATION | ID_RECALC_GEOMETRY);
+  BKE_reportf(reports,
+              RPT_INFO,
+              "Rigify PLAYBACK mode enabled on '%s' for VMD source animation",
+              target.id.name + 2);
+  return true;
 }
 
 wmOperatorStatus wm_vmd_import_exec(bContext *C, wmOperator *op)
@@ -561,6 +660,8 @@ wmOperatorStatus wm_vmd_import_exec(bContext *C, wmOperator *op)
   if (!success) {
     return OPERATOR_CANCELLED;
   }
+
+  vmd_activate_rigify_playback_mode(bmain, *target, op->reports);
 
   /* Suspend MMD approximate constraints: VMD bakes its own solve, so the
    * Blender-side approximations must yield to avoid fighting the baked curves. */
