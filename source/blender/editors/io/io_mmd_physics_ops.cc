@@ -34,6 +34,7 @@
 #include "DNA_ID.h"
 #include "DNA_action_types.h"
 #include "DNA_anim_types.h"
+#include "DNA_constraint_types.h"
 
 #include "mmd_physics_definition.hh"
 #include "mmd_physics_diagnostics.hh"
@@ -1254,12 +1255,75 @@ MMDPhysicsRuntimeSession *active_runtime_session(bContext *C)
   return runtime_session_for_armature(C, CTX_data_active_object(C));
 }
 
+/* [2026-08-23] Mirror of vmd_is_rigify_bridge_armature / vmd_find_rigify_source
+ * (io_vmd_ops.cc): an MMD armature wired by the Rigify bridge carries the
+ * mmd_rigify_mode IDP or MMR_* constraints. */
+bool object_is_rigify_bridge_armature(const Object &object)
+{
+  if (object.type != OB_ARMATURE) {
+    return false;
+  }
+  /* Mirror of the io_vmd_ops.cc rule: a generated control rig may carry
+   * auxiliary MMR_-named constraints; the bridge source never starts with
+   * "RIG-". */
+  if (strncmp(object.id.name + 2, "RIG-", 4) == 0) {
+    return false;
+  }
+  if (object.id.properties != nullptr &&
+      IDP_GetPropertyFromGroup_null(object.id.properties, "mmd_rigify_mode") != nullptr)
+  {
+    return true;
+  }
+  if (object.pose == nullptr) {
+    return false;
+  }
+  for (const bPoseChannel *pchan = static_cast<const bPoseChannel *>(object.pose->chanbase.first);
+       pchan != nullptr;
+       pchan = pchan->next)
+  {
+    for (const bConstraint *constraint = static_cast<const bConstraint *>(
+             pchan->constraints.first);
+         constraint != nullptr;
+         constraint = constraint->next)
+    {
+      if (strncmp(constraint->name, "MMR_", 4) == 0) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+Object *find_rigify_bridge_source(Main &bmain, const Object &rig)
+{
+  for (Object *ob = static_cast<Object *>(bmain.objects.first); ob != nullptr;
+       ob = static_cast<Object *>(ob->id.next))
+  {
+    if (ob != &rig && object_is_rigify_bridge_armature(*ob)) {
+      return ob;
+    }
+  }
+  return nullptr;
+}
+
 Object *resolve_operator_armature(bContext *C, wmOperator *op, ReportList *reports)
 {
   char armature_name[MAX_ID_NAME] = {};
   RNA_string_get(op->ptr, "armature_name", armature_name);
   if (armature_name[0] == '\0') {
-    return CTX_data_active_object(C);
+    Object *active = CTX_data_active_object(C);
+    /* A generated MMD -> Rigify scene leaves the RIG- control armature active
+     * after VMD import; physics data lives on the linked MMD source armature.
+     * Resolve RIG-* to its bridge source so Start works right after import. */
+    if (active != nullptr && active->type == OB_ARMATURE &&
+        strncmp(active->id.name + 2, "RIG-", 4) == 0)
+    {
+      Main *bmain = CTX_data_main(C);
+      if (bmain != nullptr && find_rigify_bridge_source(*bmain, *active) != nullptr) {
+        return find_rigify_bridge_source(*bmain, *active);
+      }
+    }
+    return active;
   }
 
   Object *armature = reinterpret_cast<Object *>(
@@ -1496,13 +1560,39 @@ MMDPhysicsSceneScheduler *ensure_scene_scheduler(bContext *C, ReportList *report
     BKE_report(reports, RPT_ERROR, "MMD Physics: missing Scene, Main, or Window context");
     return nullptr;
   }
+  if (g_physics_scheduler != nullptr && g_physics_scheduler->bmain != bmain) {
+    /* [2026-08-23] The owning Main was replaced by a file load/close. The old
+     * scheduler holds dangling pointers and could never match again, which
+     * poisoned every physics operator until process restart. Tear it down:
+     * destroy_world skips Blender-state restore for sessions whose owner is
+     * not live, so dropping here is safe. */
+    remove_timer(C);
+    destroy_world(bmain);
+    g_physics_scheduler.reset();
+  }
   if (g_physics_scheduler != nullptr) {
-    if (g_physics_scheduler->bmain != bmain ||
-        g_physics_scheduler->scene_session_uid != scene->id.session_uid)
-    {
-      BKE_report(reports,
-                 RPT_ERROR,
-                 "MMD Physics: another Scene already owns the active physics scheduler");
+    if (g_physics_scheduler->scene_session_uid != scene->id.session_uid) {
+      const Scene *owner = nullptr;
+      for (const Scene *it = static_cast<const Scene *>(bmain->scenes.first); it != nullptr;
+           it = static_cast<const Scene *>(it->id.next))
+      {
+        if (it->id.session_uid == g_physics_scheduler->scene_session_uid) {
+          owner = it;
+          break;
+        }
+      }
+      if (owner != nullptr) {
+        BKE_reportf(reports,
+                    RPT_ERROR,
+                    "MMD Physics: Scene '%s' already owns the active physics scheduler; "
+                    "stop physics there first",
+                    owner->id.name + 2);
+      }
+      else {
+        BKE_report(reports,
+                   RPT_ERROR,
+                   "MMD Physics: another Scene already owns the active physics scheduler");
+      }
       return nullptr;
     }
     return g_physics_scheduler.get();

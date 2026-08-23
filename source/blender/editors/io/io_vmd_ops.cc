@@ -17,6 +17,9 @@
 #include "BKE_lib_id.hh"
 #include "BKE_main.hh"
 #include "BKE_report.hh"
+#include "BKE_screen.hh"
+
+#include "BLI_listbase.hh"
 
 #include "mmd_ccd_ik.hh"
 
@@ -39,9 +42,14 @@
 #include "DNA_mesh_types.h"
 #include "DNA_object_types.h"
 #include "DNA_scene_types.h"
+#include "DNA_screen_types.h"
 
 #include "ED_fileselect.hh"
 #include "ED_screen.hh"
+
+#include "BLT_translation.hh"
+
+#include "MEM_guardedalloc.h"
 
 #include "RNA_access.hh"
 #include "RNA_define.hh"
@@ -468,6 +476,11 @@ static bool vmd_is_rigify_bridge_armature(const Object &object)
   if (object.type != OB_ARMATURE) {
     return false;
   }
+  /* A generated control rig may carry auxiliary MMR_-named constraints (leg
+   * IK drivers); the bridge source never starts with "RIG-". */
+  if (strncmp(object.id.name + 2, "RIG-", 4) == 0) {
+    return false;
+  }
   if (object.id.properties != nullptr &&
       IDP_GetPropertyFromGroup_null(object.id.properties, "mmd_rigify_mode") != nullptr)
   {
@@ -602,6 +615,132 @@ static bool vmd_activate_rigify_playback_mode(Main *bmain, Object &target, Repor
               "Rigify PLAYBACK mode enabled on '%s' for VMD source animation",
               target.id.name + 2);
   return true;
+}
+
+/* [2026-08-23] Counterpart of vmd_activate_rigify_playback_mode(): restore POSE
+ * (keyframe) mode. The MMR_* influence drivers key off mmd_rigify_mode, so
+ * resetting the property re-enables the bridge constraints; the native CCD
+ * override must be restored too, otherwise the native solver fights the COPY
+ * constraints (the historic foot_ik-only-lifts-the-toe failure). */
+static bool vmd_enter_rigify_pose_mode(Main &bmain, Object &target, ReportList *reports)
+{
+  if (!vmd_is_rigify_bridge_armature(target)) {
+    return false;
+  }
+
+  IDProperty *properties = IDP_EnsureProperties(&target.id);
+  IDProperty *mode = IDP_GetPropertyTypeFromGroup(properties, "mmd_rigify_mode", IDP_FLOAT);
+  if (mode != nullptr) {
+    IDP_float_set(mode, 0.0f);
+  }
+  else {
+    if (IDProperty *old = IDP_GetPropertyFromGroup_null(properties, "mmd_rigify_mode")) {
+      IDP_FreeFromGroup(properties, old);
+    }
+    IDP_AddToGroup(properties, blender::bke::idprop::create("mmd_rigify_mode", 0.0f).release());
+  }
+
+  IDProperty *override_prop = IDP_GetPropertyFromGroup_null(properties, "mmd_native_ik_override");
+  if (override_prop != nullptr) {
+    if (override_prop->type == IDP_BOOLEAN) {
+      IDP_bool_set(override_prop, true);
+    }
+    else if (override_prop->type == IDP_INT) {
+      IDP_int_set(override_prop, 1);
+    }
+  }
+  else {
+    IDP_AddToGroup(properties,
+                   blender::bke::idprop::create_bool("mmd_native_ik_override", true).release());
+  }
+
+  DEG_id_tag_update_ex(&bmain, &target.id, ID_RECALC_ANIMATION | ID_RECALC_GEOMETRY);
+  BKE_reportf(reports,
+              RPT_INFO,
+              "Rigify POSE mode restored on '%s' (Rigify controls drive the model again)",
+              target.id.name + 2);
+  return true;
+}
+
+static bool wm_mmd_rigify_mode_toggle_poll(bContext *C)
+{
+  const Object *active = CTX_data_active_object(C);
+  if (active == nullptr || active->type != OB_ARMATURE) {
+    return false;
+  }
+  if (vmd_is_rigify_bridge_armature(*active)) {
+    return true;
+  }
+  Main *bmain = CTX_data_main(C);
+  return bmain != nullptr && vmd_find_rigify_source(bmain, active) != nullptr;
+}
+
+static wmOperatorStatus wm_mmd_rigify_mode_toggle_exec(bContext *C, wmOperator *op)
+{
+  Main *bmain = CTX_data_main(C);
+  Object *active = CTX_data_active_object(C);
+  if (active == nullptr || active->type != OB_ARMATURE) {
+    BKE_report(op->reports, RPT_ERROR, "MMD Rigify: select an Armature object first");
+    return OPERATOR_CANCELLED;
+  }
+
+  Object *target = active;
+  if (!vmd_is_rigify_bridge_armature(*target)) {
+    target = vmd_find_rigify_source(bmain, active);
+  }
+  if (target == nullptr || !vmd_is_rigify_bridge_armature(*target)) {
+    BKE_report(op->reports, RPT_ERROR, "MMD Rigify: the active model has no Rigify bridge");
+    return OPERATOR_CANCELLED;
+  }
+
+  const IDProperty *mode = IDP_GetPropertyFromGroup_null(target->id.properties,
+                                                         "mmd_rigify_mode");
+  const bool playback_active = mode != nullptr && mode->type == IDP_FLOAT &&
+                               mode->data.val != 0.0f;
+  if (playback_active) {
+    vmd_enter_rigify_pose_mode(*bmain, *target, op->reports);
+  }
+  else {
+    vmd_activate_rigify_playback_mode(bmain, *target, op->reports);
+  }
+  WM_event_add_notifier(C, NC_OBJECT | ND_POSE, target);
+  return OPERATOR_FINISHED;
+}
+
+/* --------------------------------------------------------------------- */
+/* N-panel (sidebar): compact POSE/PLAYBACK status + toggle button.      */
+/* --------------------------------------------------------------------- */
+
+static bool mmd_rigify_mode_panel_poll(const bContext *C, PanelType * /*pt*/)
+{
+  return wm_mmd_rigify_mode_toggle_poll(const_cast<bContext *>(C));
+}
+
+static void mmd_rigify_mode_panel_draw(const bContext *C, Panel *panel)
+{
+  ui::Layout &layout = *panel->layout;
+  Main *bmain = CTX_data_main(const_cast<bContext *>(C));
+  Object *active = CTX_data_active_object(const_cast<bContext *>(C));
+
+  Object *target = active;
+  if (target != nullptr && !vmd_is_rigify_bridge_armature(*target)) {
+    target = vmd_find_rigify_source(bmain, target);
+  }
+  if (target == nullptr || !vmd_is_rigify_bridge_armature(*target)) {
+    layout.label(IFACE_("No Rigify-bridged MMD armature"), ICON_INFO);
+    return;
+  }
+
+  const IDProperty *mode = IDP_GetPropertyFromGroup_null(target->id.properties,
+                                                         "mmd_rigify_mode");
+  const bool playback_active = mode != nullptr && mode->type == IDP_FLOAT &&
+                               mode->data.val != 0.0f;
+  layout.label(playback_active ? IFACE_("Mode: PLAYBACK (VMD drives)") :
+                                 IFACE_("Mode: POSE (Rigify drives)"),
+               playback_active ? ICON_PLAY : ICON_OUTLINER_DATA_ARMATURE);
+  layout.op("WM_OT_mmd_rigify_mode_toggle",
+            playback_active ? IFACE_("Switch to POSE") : IFACE_("Switch to PLAYBACK"),
+            ICON_FILE_REFRESH);
 }
 
 wmOperatorStatus wm_vmd_import_exec(bContext *C, wmOperator *op)
@@ -1248,6 +1387,32 @@ void WM_OT_vmd_camera_export(wmOperatorType *ot)
                 1.0f);
   PropertyRNA *prop = RNA_def_string(ot->srna, "filter_glob", "*.vmd", 0, "Extension Filter", "");
   RNA_def_property_flag(prop, PROP_HIDDEN);
+}
+
+void WM_OT_mmd_rigify_mode_toggle(wmOperatorType *ot)
+{
+  ot->name = "Toggle MMD Rigify Mode";
+  ot->description = "Switch the bridged MMD armature between Rigify POSE keyframing "
+                    "and VMD PLAYBACK";
+  ot->idname = "WM_OT_mmd_rigify_mode_toggle";
+  ot->exec = wm_mmd_rigify_mode_toggle_exec;
+  ot->poll = wm_mmd_rigify_mode_toggle_poll;
+  ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
+}
+
+void ED_mmd_rigify_panel_register(ARegionType *art)
+{
+  if (art == nullptr) {
+    return;
+  }
+  PanelType *pt = MEM_new_zeroed<PanelType>("spacetype view3d panel mmd rigify");
+  STRNCPY_UTF8(pt->idname, "VIEW3D_PT_mmd_rigify");
+  STRNCPY_UTF8(pt->label, N_("MMD Rigify"));
+  STRNCPY_UTF8(pt->category, "MMD");
+  STRNCPY_UTF8(pt->translation_context, BLT_I18NCONTEXT_DEFAULT_BPYRNA);
+  pt->draw = mmd_rigify_mode_panel_draw;
+  pt->poll = mmd_rigify_mode_panel_poll;
+  BLI_addtail(&art->paneltypes, pt);
 }
 
 namespace ed::io {
