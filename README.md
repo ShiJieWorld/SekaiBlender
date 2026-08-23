@@ -113,6 +113,7 @@ For a CPU-only build, omit the CUDA and OptiX options. The `INSTALL` target is i
 
 ## Known Limits
 
+- The MMD → Rigify integration (`mmd_native_ik_override`, Rigify scene VMD playback) is still in testing: prototype workflows validated on two reference models so far; K-frame baking and toe/heel roll controls are pending.
 - VMD light and self-shadow frames are not imported or exported.
 - PMX Bone, UV, Material, Flip and Impulse Morph data do not all map to active Blender effects yet.
 - PMX export currently accepts models imported by SekaiBlender with source-retention data; arbitrary native Blender meshes are rejected rather than exported with guessed semantics.
