@@ -96,6 +96,7 @@ void ED_operatortypes_io()
   WM_operatortype_append(WM_OT_vmd_camera_import);
   WM_operatortype_append(WM_OT_vmd_export);
   WM_operatortype_append(WM_OT_vmd_camera_export);
+  WM_operatortype_append(WM_OT_mmd_rigify_mode_toggle);
   ed::io::vmd_file_handler_add();
 
 #ifdef WITH_IO_PMX
