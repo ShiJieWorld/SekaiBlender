@@ -71,6 +71,10 @@ struct MMDJointDefinition {
   std::array<float, 3> rotation_min{};
   std::array<float, 3> rotation_max{};
   std::array<MMDJointAxisLimitMode, 3> rotation_limit_mode{};
+  /* Same convention as rotation_limit_mode, for the linear axes: PMX/MMD stores
+   * an inverted interval (min > max) to mark an unconstrained axis (no infinity
+   * in the format). See the import validation note in mmd_physics_definition.cc. */
+  std::array<MMDJointAxisLimitMode, 3> translation_limit_mode{};
   std::array<float, 3> spring_translation{};
   std::array<float, 3> spring_rotation{};
 };
