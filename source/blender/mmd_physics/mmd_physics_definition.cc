@@ -502,10 +502,18 @@ MMDPhysicsBuildResult build_physics_definition(const PMXModel &model,
       joint_valid = false;
     }
     for (int axis = 0; axis < 3; axis++) {
-      if (joint.translation_min[axis] > joint.translation_max[axis]) {
-        add_error(result, "joints", i, "translation_limits", "minimum exceeds maximum");
-        joint_valid = false;
-      }
+      /* PMX/MMD uses an inverted interval (min > max) to represent a free axis,
+       * for linear limits exactly as for angular ones: the format has no
+       * infinity, so exporters encode "unconstrained" as an impossible range.
+       * Real-world case: PMXEditor breast-physics templates (安和/莫宁/杜林)
+       * store e.g. min=(+0.85, +0.85, +0.85) / max=(0, 0, 0) on every jiggle
+       * axis while locked axes use min == max. Bullet agrees with this reading:
+       * the btGeneric6DofConstraint limit motors treat loLimit > hiLimit as
+       * "Free from violation" and emit no constraint row, so the raw values can
+       * flow through to the constraint unchanged. */
+      joint.translation_limit_mode[axis] =
+          joint.translation_min[axis] > joint.translation_max[axis] ? MMDJointAxisLimitMode::Free :
+                                                                      MMDJointAxisLimitMode::Limited;
       /* PMX/MMD uses an inverted angular interval to represent a free axis. */
       joint.rotation_limit_mode[axis] = joint.rotation_min[axis] > joint.rotation_max[axis] ?
                                             MMDJointAxisLimitMode::Free :
@@ -619,6 +627,10 @@ bool serialize_physics_definition(Collection &model_root,
                     int(joint.rotation_limit_mode[1]),
                     int(joint.rotation_limit_mode[2])};
     add_property(item, new_int_array("rotation_limit_mode", modes, 3));
+    int translation_modes[3] = {int(joint.translation_limit_mode[0]),
+                                int(joint.translation_limit_mode[1]),
+                                int(joint.translation_limit_mode[2])};
+    add_property(item, new_int_array("translation_limit_mode", translation_modes, 3));
     add_vec3(item, "spring_translation", joint.spring_translation);
     add_vec3(item, "spring_rotation", joint.spring_rotation);
     append_group(joints, item);
@@ -775,13 +787,35 @@ bool deserialize_physics_definition(const Collection &model_root,
       return false;
     }
     const int *mode_values = IDP_array_int_get(modes);
+    /* Optional field added together with free-axis translation limits.
+     * Definitions persisted before it existed can only contain ordered
+     * translation intervals (the old validator rejected inverted ones), so the
+     * modes are simply re-derived from the limits when the array is absent.
+     * schema_version stays at 2: this is an optional-field extension. */
+    IDProperty *translation_modes = get_array(item, "translation_limit_mode", 3, IDP_INT);
+    const int *translation_mode_values = translation_modes ? IDP_array_int_get(translation_modes) :
+                                                            nullptr;
     for (int axis = 0; axis < 3; axis++) {
       if (mode_values[axis] < 0 || mode_values[axis] > 1) {
         report_error(reports, "MMD physics definition: unsupported joint rotation limit mode");
         return false;
       }
       joint.rotation_limit_mode[axis] = MMDJointAxisLimitMode(mode_values[axis]);
-      if (joint.translation_min[axis] > joint.translation_max[axis] ||
+      if (translation_mode_values) {
+        if (translation_mode_values[axis] < 0 || translation_mode_values[axis] > 1) {
+          report_error(reports, "MMD physics definition: unsupported joint translation limit mode");
+          return false;
+        }
+        joint.translation_limit_mode[axis] = MMDJointAxisLimitMode(translation_mode_values[axis]);
+      }
+      else {
+        joint.translation_limit_mode[axis] =
+            joint.translation_min[axis] > joint.translation_max[axis] ?
+                MMDJointAxisLimitMode::Free :
+                MMDJointAxisLimitMode::Limited;
+      }
+      if ((joint.translation_limit_mode[axis] == MMDJointAxisLimitMode::Limited &&
+           joint.translation_min[axis] > joint.translation_max[axis]) ||
           (joint.rotation_limit_mode[axis] == MMDJointAxisLimitMode::Limited &&
            joint.rotation_min[axis] > joint.rotation_max[axis]))
       {
@@ -1145,11 +1179,22 @@ bool validate_joint(const MMDJointDefinition &joint,
     }
   }
   for (int axis = 0; axis < 3; axis++) {
-    if (joint.translation_min[axis] > joint.translation_max[axis]) {
+    if (joint.translation_limit_mode[axis] != MMDJointAxisLimitMode::Limited &&
+        joint.translation_limit_mode[axis] != MMDJointAxisLimitMode::Free)
+    {
+      add_mapping_issue(report,
+                        MMDPhysicsMappingIssueSeverity::Error,
+                        prefix + "translation_limit_mode",
+                        "unsupported axis mode");
+      valid = false;
+    }
+    else if (joint.translation_limit_mode[axis] == MMDJointAxisLimitMode::Limited &&
+             joint.translation_min[axis] > joint.translation_max[axis])
+    {
       add_mapping_issue(report,
                         MMDPhysicsMappingIssueSeverity::Error,
                         prefix + "translation_limits",
-                        "minimum exceeds maximum");
+                        "limited axis minimum exceeds maximum");
       valid = false;
     }
     if (joint.rotation_limit_mode[axis] != MMDJointAxisLimitMode::Limited &&

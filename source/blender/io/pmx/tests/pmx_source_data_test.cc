@@ -30,6 +30,10 @@
 #include "pmx_import_mesh.hh"
 #include "pmx_source_data.hh"
 
+#include "mmd_physics_definition.hh"
+
+#include "BLI_vector.hh"
+
 #include "MEM_guardedalloc.h"
 
 #include <cstdio>
@@ -842,6 +846,207 @@ TEST_F(PMXSourceDataTest, round_trips_data_with_no_sections)
   EXPECT_TRUE(read.bones.empty());
   EXPECT_TRUE(read.morphs.empty());
   EXPECT_TRUE(read.display_frames.empty());
+}
+
+/* ---------------------------------------------------------------------------
+ * Physics definition: inverted (min > max) translation limits mean a free
+ * axis, mirroring the long-established angular convention. Real-world case:
+ * PMXEditor breast-physics templates (安和/莫宁/杜林) encode unconstrained
+ * axes this way; Bullet's 6DOF limit motors agree ("Free from violation").
+ * ------------------------------------------------------------------------- */
+
+namespace {
+
+PMXRigidBody make_limit_test_rigid(const char *name)
+{
+  PMXRigidBody rigid{};
+  rigid.name_local = name;
+  rigid.bone_index = -1;
+  rigid.shape_type = 0; /* Sphere. */
+  rigid.shape_size[0] = 1.0f;
+  rigid.shape_size[1] = 1.0f;
+  rigid.shape_size[2] = 1.0f;
+  rigid.mass = 1.0f;
+  rigid.physics_type = 1; /* Dynamic. */
+  return rigid;
+}
+
+PMXJoint make_limit_test_joint(const char *name, const int rigid_a, const int rigid_b)
+{
+  PMXJoint joint{};
+  joint.name_local = name;
+  joint.type = 0;
+  joint.rigid_a_index = rigid_a;
+  joint.rigid_b_index = rigid_b;
+  /* Ordered intervals by default: a symmetric range on every axis. */
+  for (int axis = 0; axis < 3; axis++) {
+    joint.translation_limit_min[axis] = -1.0f;
+    joint.translation_limit_max[axis] = 1.0f;
+    joint.rotation_limit_min[axis] = -0.5f;
+    joint.rotation_limit_max[axis] = 0.5f;
+  }
+  return joint;
+}
+
+std::string join_build_errors(const blender::mmd_physics::MMDPhysicsBuildResult &result)
+{
+  std::string joined;
+  for (const std::string &error : result.errors) {
+    joined += error;
+    joined += "; ";
+  }
+  return joined;
+}
+
+}  // namespace
+
+/* NOTE: tests live under the already-registered PMXSourceDataTest suite; new
+ * top-level suites only enter the CTest gtest_filter on cmake reconfigure. */
+
+TEST_F(PMXSourceDataTest, physics_build_inverted_translation_interval_means_free_axis)
+{
+  /* PMXEditor breast-physics templates encode unconstrained axes as an
+   * impossible range (e.g. 安和/莫宁): min=(+0.85, ..) / max=(0, ..).
+   * This must validate as Free instead of invalidating the joint.
+   * The inversion sits on the PMX X axis: transform_position maps PMX
+   * (x,y,z) -> Blender (x,z,y), and X is the axis that passes through. */
+  PMXJoint joint = make_limit_test_joint("breast", 0, 1);
+  joint.translation_limit_min[0] = 0.85f;
+  joint.translation_limit_max[0] = 0.0f;
+
+  PMXModel model;
+  model.name_local = "LimitTest";
+  model.rigid_bodies.push_back(make_limit_test_rigid("RigidA"));
+  model.rigid_bodies.push_back(make_limit_test_rigid("RigidB"));
+  model.joints.push_back(joint);
+
+  blender::mmd_physics::MMDPhysicsBuildResult result =
+      blender::mmd_physics::build_physics_definition(
+          model, blender::Vector<std::string>{}, "LimitTest", 0.08f);
+
+  ASSERT_TRUE(result.success()) << join_build_errors(result);
+  ASSERT_EQ(result.definition.joints.size(), 1);
+  using Lim = blender::mmd_physics::MMDJointAxisLimitMode;
+  EXPECT_EQ(result.definition.joints[0].translation_limit_mode[0], Lim::Free);
+  EXPECT_EQ(result.definition.joints[0].translation_limit_mode[1], Lim::Limited);
+  EXPECT_EQ(result.definition.joints[0].translation_limit_mode[2], Lim::Limited);
+  /* The rotation path keeps its existing semantics unchanged. */
+  EXPECT_EQ(result.definition.joints[0].rotation_limit_mode[0], Lim::Limited);
+  EXPECT_EQ(result.definition.joints[0].rotation_limit_mode[1], Lim::Limited);
+  EXPECT_EQ(result.definition.joints[0].rotation_limit_mode[2], Lim::Limited);
+  EXPECT_EQ(result.definition.validation.invalid_joints, 0);
+}
+
+TEST_F(PMXSourceDataTest, physics_build_ordered_translation_intervals_stay_limited)
+{
+  PMXModel model;
+  model.name_local = "LimitTest";
+  model.rigid_bodies.push_back(make_limit_test_rigid("RigidA"));
+  model.rigid_bodies.push_back(make_limit_test_rigid("RigidB"));
+  model.joints.push_back(make_limit_test_joint("ordered", 0, 1));
+
+  blender::mmd_physics::MMDPhysicsBuildResult result =
+      blender::mmd_physics::build_physics_definition(
+          model, blender::Vector<std::string>{}, "LimitTest", 0.08f);
+
+  ASSERT_TRUE(result.success()) << join_build_errors(result);
+  using Lim = blender::mmd_physics::MMDJointAxisLimitMode;
+  for (const int axis : {0, 1, 2}) {
+    EXPECT_EQ(result.definition.joints[0].translation_limit_mode[axis], Lim::Limited);
+    EXPECT_EQ(result.definition.joints[0].rotation_limit_mode[axis], Lim::Limited);
+  }
+}
+
+namespace {
+
+blender::mmd_physics::MMDPhysicsDefinition make_persisted_limit_definition(
+    const bool inverted_translation)
+{
+  PMXJoint joint = make_limit_test_joint("joint", 0, 1);
+  if (inverted_translation) {
+    /* PMX X axis passes through transform_position unchanged. */
+    joint.translation_limit_min[0] = 0.85f;
+    joint.translation_limit_max[0] = 0.0f;
+  }
+  PMXModel model;
+  model.name_local = "LimitTest";
+  model.rigid_bodies.push_back(make_limit_test_rigid("RigidA"));
+  model.rigid_bodies.push_back(make_limit_test_rigid("RigidB"));
+  model.joints.push_back(joint);
+
+  blender::mmd_physics::MMDPhysicsBuildResult result =
+      blender::mmd_physics::build_physics_definition(
+          model, blender::Vector<std::string>{}, "LimitTest", 0.08f);
+  EXPECT_TRUE(result.success());
+  return result.definition;
+}
+
+}  // namespace
+
+TEST_F(PMXSourceDataTest, physics_round_trip_preserves_translation_modes)
+{
+  const blender::mmd_physics::MMDPhysicsDefinition definition =
+      make_persisted_limit_definition(true);
+  ASSERT_TRUE(
+      blender::mmd_physics::serialize_physics_definition(*model_collection, definition, &reports));
+
+  using Lim = blender::mmd_physics::MMDJointAxisLimitMode;
+  blender::mmd_physics::MMDPhysicsDefinition loaded;
+  ASSERT_TRUE(
+      blender::mmd_physics::deserialize_physics_definition(*model_collection, loaded, &reports));
+  ASSERT_EQ(loaded.joints.size(), 1);
+  EXPECT_EQ(loaded.joints[0].translation_limit_mode[0], Lim::Free);
+  EXPECT_EQ(loaded.joints[0].translation_limit_mode[1], Lim::Limited);
+  EXPECT_EQ(loaded.joints[0].translation_limit_mode[2], Lim::Limited);
+}
+
+TEST_F(PMXSourceDataTest, physics_legacy_definition_without_mode_field_rederives_from_limits)
+{
+  /* Definitions persisted before translation_limit_mode existed can only
+   * contain ordered intervals (the old validator rejected inversions), so the
+   * modes are re-derived from the limits when the array is absent. */
+  const blender::mmd_physics::MMDPhysicsDefinition definition =
+      make_persisted_limit_definition(false);
+  ASSERT_TRUE(
+      blender::mmd_physics::serialize_physics_definition(*model_collection, definition, &reports));
+
+  IDProperty *system = model_collection->id.system_properties;
+  ASSERT_NE(system, nullptr);
+  IDProperty *root = IDP_GetPropertyTypeFromGroup(system, "mmd_physics_definition", IDP_GROUP);
+  ASSERT_NE(root, nullptr);
+  IDProperty *joints = IDP_GetPropertyTypeFromGroup(root, "joints", IDP_IDPARRAY);
+  ASSERT_NE(joints, nullptr);
+  for (int i = 0; i < joints->len; i++) {
+    IDProperty *item = IDP_GetIndexArray(joints, i);
+    ASSERT_NE(item, nullptr);
+    if (IDProperty *modes = IDP_GetPropertyTypeFromGroup(item, "translation_limit_mode", IDP_INT)) {
+      IDP_FreeFromGroup(item, modes);
+    }
+  }
+
+  using Lim = blender::mmd_physics::MMDJointAxisLimitMode;
+  blender::mmd_physics::MMDPhysicsDefinition loaded;
+  ASSERT_TRUE(
+      blender::mmd_physics::deserialize_physics_definition(*model_collection, loaded, &reports));
+  ASSERT_EQ(loaded.joints.size(), 1);
+  for (const int axis : {0, 1, 2}) {
+    EXPECT_EQ(loaded.joints[0].translation_limit_mode[axis], Lim::Limited);
+  }
+}
+
+TEST_F(PMXSourceDataTest, physics_limited_axis_with_inverted_interval_is_rejected_on_load)
+{
+  /* A persisted Limited mode claims the interval is meaningful; storing an
+   * inversion there remains corrupt data and must be refused. */
+  blender::mmd_physics::MMDPhysicsDefinition definition = make_persisted_limit_definition(false);
+  definition.joints[0].translation_min[2] = 2.0f;
+  definition.joints[0].translation_max[2] = 1.0f;
+  ASSERT_TRUE(
+      blender::mmd_physics::serialize_physics_definition(*model_collection, definition, &reports));
+
+  blender::mmd_physics::MMDPhysicsDefinition loaded;
+  EXPECT_FALSE(
+      blender::mmd_physics::deserialize_physics_definition(*model_collection, loaded, &reports));
 }
 
 }  // namespace
