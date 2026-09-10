@@ -222,6 +222,59 @@ class ArmatureDeformTestBase {
     return mesh;
   }
 
+  /* Three-vertex triangle used by the PMX weight-outlier tests.
+   * Vertex 1 is the candidate: a short rest edge to vertex 2 stretches under pose
+   * because Bone1 and Bone2 translate differently. */
+  Object *create_pmx_three_vert_mesh_object(const float weights_bone1[3],
+                                            const float weights_bone2[3]) const
+  {
+    Object *ob = BKE_object_add_only_object(bmain, OB_MESH, "PMX Strip Object");
+    Mesh *mesh_in_main = BKE_mesh_add(bmain, "PMX Strip Mesh");
+    ob->data = id_cast<ID *>(mesh_in_main);
+
+    Mesh *mesh = BKE_mesh_new_nomain(3, 0, 1, 3);
+    MutableSpan<float3> positions = mesh->vert_positions_for_write();
+    positions[0] = float3(0.0f, 0.0f, 0.0f);
+    positions[1] = float3(0.01f, 0.0f, 0.0f);
+    positions[2] = float3(0.02f, 0.0f, 0.0f);
+
+    MutableSpan<int> corner_verts = mesh->corner_verts_for_write();
+    corner_verts[0] = 0;
+    corner_verts[1] = 1;
+    corner_verts[2] = 2;
+    offset_indices::fill_constant_group_size(3, 0, mesh->face_offsets_for_write());
+    bke::mesh_calc_edges(*mesh, false, false);
+
+    MutableSpan<MDeformVert> dverts = mesh->deform_verts_for_write();
+    for (int i = 0; i < 3; i++) {
+      if (weights_bone1[i] > 0.0f) {
+        BKE_defvert_add_index_notest(&dverts[i], 0, weights_bone1[i]);
+      }
+      if (weights_bone2[i] > 0.0f) {
+        BKE_defvert_add_index_notest(&dverts[i], 1, weights_bone2[i]);
+      }
+    }
+
+    bke::MutableAttributeAccessor attributes = mesh->attributes_for_write();
+    bke::SpanAttributeWriter<int8_t> weight_types =
+        attributes.lookup_or_add_for_write_only_span<int8_t>("pmx_weight_type",
+                                                             bke::AttrDomain::Point);
+    BLI_assert(weight_types);
+    weight_types.span.fill(int8_t(0));
+    weight_types.finish();
+
+    bDeformGroup *defgroup1 = MEM_new<bDeformGroup>(__func__);
+    bDeformGroup *defgroup2 = MEM_new<bDeformGroup>(__func__);
+    STRNCPY(defgroup1->name, "Bone1");
+    STRNCPY(defgroup2->name, "Bone2");
+    BLI_addtail(&mesh->vertex_group_names, defgroup1);
+    BLI_addtail(&mesh->vertex_group_names, defgroup2);
+
+    mesh->tag_positions_changed();
+    BKE_mesh_nomain_to_mesh(mesh, mesh_in_main, ob);
+    return ob;
+  }
+
   /* Creates a cube with all vertices in "Bone1" group and the top face in "Bone2" group. */
   Object *create_test_mesh_object() const
   {
@@ -856,6 +909,67 @@ TEST_F(ArmatureDeformTest, PMXSDEFMeshDeform)
 
   EXPECT_NE(positions[4], original_sdef_position);
   EXPECT_NE(positions[4], positions[5]);
+
+  BKE_id_delete(bmain, ob_arm);
+  BKE_id_delete(bmain, ob_target);
+}
+
+TEST_F(ArmatureDeformTest, PMXWeightOutlierSeamVertexKeepsOwnWeight)
+{
+  /* JaneDoe neck seam (issue #4): a 100% head vertex sits next to mixed
+   * head/neck neighbors. The neighbor-average looks like an outlier, but at
+   * least one neighbor still shares the head weight, so ordinary LBS must win.
+   * Rewriting this vertex toward the neck bone opens a hole against the
+   * uncorrected face mesh. */
+  const float weights_bone1[3] = {1.0f, 1.0f, 0.3f};
+  const float weights_bone2[3] = {0.0f, 0.0f, 0.7f};
+  Object *ob_arm = this->create_test_armature_object();
+  Object *ob_target = this->create_pmx_three_vert_mesh_object(weights_bone1, weights_bone2);
+  Mesh *mesh = id_cast<Mesh *>(ob_target->data);
+  MutableSpan<float3> positions = mesh->vert_positions_for_write();
+  const float3 original = positions[1];
+
+  BKE_armature_deform_coords_with_mesh(*ob_arm,
+                                       *ob_target,
+                                       positions,
+                                       std::nullopt,
+                                       std::nullopt,
+                                       ARM_DEF_VGROUP,
+                                       "",
+                                       mesh);
+
+  const float3 expected = original + offset_bone1();
+  EXPECT_V3_NEAR(positions[1], expected, 1.0e-5f);
+
+  BKE_id_delete(bmain, ob_arm);
+  BKE_id_delete(bmain, ob_target);
+}
+
+TEST_F(ArmatureDeformTest, PMXWeightOutlierIsolatedVertexIsCorrected)
+{
+  /* Vertex 1 disagrees with every topological neighbor. The original isolated-
+   * vertex repair must still rewrite its posed position away from pure Bone1. */
+  const float weights_bone1[3] = {0.0f, 1.0f, 0.0f};
+  const float weights_bone2[3] = {1.0f, 0.0f, 1.0f};
+  Object *ob_arm = this->create_test_armature_object();
+  Object *ob_target = this->create_pmx_three_vert_mesh_object(weights_bone1, weights_bone2);
+  Mesh *mesh = id_cast<Mesh *>(ob_target->data);
+  MutableSpan<float3> positions = mesh->vert_positions_for_write();
+  const float3 original = positions[1];
+
+  BKE_armature_deform_coords_with_mesh(*ob_arm,
+                                       *ob_target,
+                                       positions,
+                                       std::nullopt,
+                                       std::nullopt,
+                                       ARM_DEF_VGROUP,
+                                       "",
+                                       mesh);
+
+  const float3 uncorrected = original + offset_bone1();
+  EXPECT_NE(positions[1], uncorrected);
+  const float3 expected = original + offset_bone1() * 0.25f + offset_bone2() * 0.75f;
+  EXPECT_V3_NEAR(positions[1], expected, 1.0e-5f);
 
   BKE_id_delete(bmain, ob_arm);
   BKE_id_delete(bmain, ob_target);

@@ -664,8 +664,13 @@ static void armature_vert_task_with_dvert(const ArmatureDeformParams &deform_par
  * every topological neighbor.  Under a large pose rotation that creates a
  * discontinuity in the surface even though each vertex is correctly evaluated
  * by ordinary LBS.  Repair only those vertices whose current incident edge is
- * stretched and whose weight vector is also a local outlier.  The original
- * vertex groups remain unchanged; this is a per-pose deformation correction.
+ * stretched and whose weight vector disagrees with every neighbor.  Comparing
+ * against the neighbor-average is not enough: a material-split neck seam is a
+ * 100% head vertex next to mixed head/neck neighbors, so the average looks
+ * like an outlier while at least one neighbor still shares the head weight.
+ * Rewriting that seam vertex toward the neck bone opens a hole against the
+ * uncorrected face mesh.  The original vertex groups remain unchanged; this
+ * is a per-pose deformation correction.
  */
 static bool pmx_weight_corrected_deform_point(const ArmatureDeformParams &params,
                                               const float3 &target_co,
@@ -765,6 +770,7 @@ static void pmx_correct_weight_outliers(const ArmatureDeformParams &params,
 
   Array<float> self_weights(defgroup_num, 0.0f);
   Array<float> neighbor_weights(defgroup_num, 0.0f);
+  Array<float> this_neighbor_weights(defgroup_num, 0.0f);
   Array<float> corrected_weights(defgroup_num, 0.0f);
 
   for (const int i : IndexRange(vert_num)) {
@@ -795,6 +801,7 @@ static void pmx_correct_weight_outliers(const ArmatureDeformParams &params,
     }
 
     int valid_neighbor_count = 0;
+    bool disagrees_with_every_neighbor = true;
     for (const int neighbor : neighbors[i]) {
       if (params.pmx_weight_type[neighbor] == pmx_sdef_weight_type) {
         continue;
@@ -812,31 +819,35 @@ static void pmx_correct_weight_outliers(const ArmatureDeformParams &params,
         continue;
       }
 
+      this_neighbor_weights.as_mutable_span().fill(0.0f);
       const float inverse_neighbor_sum = 1.0f / neighbor_sum;
       for (const MDeformWeight &dw : Span(dverts[neighbor].dw, dverts[neighbor].totweight)) {
         if (dw.def_nr >= 0 && dw.def_nr < defgroup_num &&
             params.pose_channel_by_vertex_group[dw.def_nr].pchan != nullptr)
         {
-          neighbor_weights[dw.def_nr] += dw.weight * inverse_neighbor_sum;
+          const float normalized = dw.weight * inverse_neighbor_sum;
+          neighbor_weights[dw.def_nr] += normalized;
+          this_neighbor_weights[dw.def_nr] += normalized;
         }
       }
       valid_neighbor_count++;
+
+      float neighbor_l1 = 0.0f;
+      for (const int def_nr : IndexRange(defgroup_num)) {
+        neighbor_l1 += math::abs(self_weights[def_nr] - this_neighbor_weights[def_nr]);
+      }
+      if (neighbor_l1 <= weight_outlier_threshold) {
+        disagrees_with_every_neighbor = false;
+        break;
+      }
     }
-    if (valid_neighbor_count == 0) {
+    if (valid_neighbor_count == 0 || !disagrees_with_every_neighbor) {
       continue;
     }
 
     const float inverse_neighbor_count = 1.0f / float(valid_neighbor_count);
     for (const int def_nr : IndexRange(defgroup_num)) {
       neighbor_weights[def_nr] *= inverse_neighbor_count;
-    }
-
-    float weight_l1 = 0.0f;
-    for (const int def_nr : IndexRange(defgroup_num)) {
-      weight_l1 += math::abs(self_weights[def_nr] - neighbor_weights[def_nr]);
-    }
-    if (weight_l1 <= weight_outlier_threshold) {
-      continue;
     }
 
     for (const int def_nr : IndexRange(defgroup_num)) {
