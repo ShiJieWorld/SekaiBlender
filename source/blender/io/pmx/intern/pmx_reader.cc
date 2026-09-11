@@ -427,7 +427,7 @@ void PMXReader::read_materials() {
         mat.texture_idx = read_texture_index();
         mat.sphere_texture_idx = read_texture_index();
         const uint8_t sphere_mode = r_.read_byte();
-        if (sphere_mode > static_cast<uint8_t>(SphereMode::Cube)) {
+        if (sphere_mode > static_cast<uint8_t>(SphereMode::SubTex)) {
             throw PMXReaderError("Invalid sphere mode: " + std::to_string(sphere_mode));
         }
         mat.sphere_mode = (SphereMode)sphere_mode;

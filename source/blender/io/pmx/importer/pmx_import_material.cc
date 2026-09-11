@@ -484,12 +484,16 @@ Material *create_pmx_material(PMXImportContext &ctx, const PMXModel &model, cons
   write_pmx_edge_data(*material, pmx_material);
 
   Image *base_texture = load_texture(ctx, pmx_material, pmx_material.texture_idx, "base");
-  Image *sphere_texture = pmx_material.sphere_mode == SphereMode::None ?
-                              nullptr :
-                              load_texture(ctx,
-                                           pmx_material,
-                                           pmx_material.sphere_texture_idx,
-                                           "sphere");
+  /* sph/spa use view-space mixing. SubTex (mode 3) samples additional UV1 in
+   * mmd_tools; that viewport path is not wired here. The mode and texture
+   * index still persist for export. */
+  const bool use_sphere_mix = pmx_material.sphere_mode == SphereMode::Sphere ||
+                              pmx_material.sphere_mode == SphereMode::Cube;
+  Image *sphere_texture = use_sphere_mix ? load_texture(ctx,
+                                                        pmx_material,
+                                                        pmx_material.sphere_texture_idx,
+                                                        "sphere") :
+                                           nullptr;
   build_pmx_principled_tree(*material, pmx_material, base_texture, sphere_texture);
 
   ctx.material_cache.add(material_index, material);
