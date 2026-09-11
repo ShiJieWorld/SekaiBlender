@@ -101,7 +101,7 @@ The repository uses Git LFS for Blender test assets and other binary resources. 
 ### Configure, Build And Run
 
 ```powershell
-cmake -S . -B ..\build -G "Visual Studio 17 2022" -A x64 `
+cmake -S . -B ..\build -G "Visual Studio 18 2026" -A x64 `
   -DWITH_CYCLES_CUDA_BINARIES=ON `
   -DWITH_CYCLES_DEVICE_OPTIX=ON
 
@@ -109,14 +109,18 @@ cmake --build ..\build --config Release --target INSTALL
 ..\build\bin\Release\SekaiBlender.exe
 ```
 
+Use the generator matching the installed Visual Studio version: Visual Studio 17 2022 uses `Visual Studio 17 2022`, while Visual Studio 18 2026 uses `Visual Studio 18 2026`.
+
 For a CPU-only build, omit the CUDA and OptiX options. The `INSTALL` target is intentional: it refreshes the runtime `5.3/scripts` tree used by the packaged executable.
 
 ## Known Limits
 
 - The MMD → Rigify integration (`mmd_native_ik_override`, Rigify scene VMD playback) is still in testing: prototype workflows validated on two reference models so far; K-frame baking and toe/heel roll controls are pending.
 - VMD light and self-shadow frames are not imported or exported.
-- PMX Bone, UV, Material, Flip and Impulse Morph data do not all map to active Blender effects yet.
+- Vertex and Group→Vertex Morphs have viewport effects; Bone, UV, Material, Flip and Impulse Morph data are retained but do not all map to active Blender effects yet.
+- QDEF and SDEF are evaluated as linear blend skinning rather than true QDEF/SDEF.
 - PMX export currently accepts models imported by SekaiBlender with source-retention data; arbitrary native Blender meshes are rejected rather than exported with guessed semantics.
+- Realtime preview may ring at startup; use Action Bake for final output, and damping 0.15 can suppress animal-ear motion.
 - Realtime physics sessions are independent per model within one Scene. Different Scenes cannot own simultaneous global realtime schedulers.
 
 ## Project Status
