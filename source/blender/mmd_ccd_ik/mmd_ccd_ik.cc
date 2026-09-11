@@ -7,9 +7,9 @@
  *
  * MMD native CCD IK solver implementation.
  *
- * FROZEN (2026-07-25): VMD import 路径不再使用此 solver，改用
- * iTaSC + influence F-Curve 方案。此代码仅用于实时 IK 模式。
- * 详见 mmd_ccd_ik_eval.cc 头注释和 project_memory.md。
+ * The native V8 solver is enabled by default. The POSE_DONE evaluation path
+ * also runs while a VMD action is playing; it is mutually exclusive with
+ * iTaSC's MMD_IK_Approx path, so VMD must not double-write the same IK chain.
  */
 
 #include "mmd_ccd_ik.hh"

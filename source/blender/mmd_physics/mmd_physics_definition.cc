@@ -861,7 +861,7 @@ bool write_physics_definition_json(const MMDPhysicsDefinition &definition,
 
   fprintf(file,
           "{\"schema_version\":%d,\"export_kind\":\"mmd_physics_definition\","
-          "\"producer\":\"blender_mmdworld\",\"source\":{\"model_name\":",
+          "\"producer\":\"sekaiblender\",\"source\":{\"model_name\":",
           definition.schema_version);
   write_json_string(file, definition.source_model_name);
   fputs(",\"pmx_version\":", file);

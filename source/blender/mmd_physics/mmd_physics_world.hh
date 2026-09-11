@@ -525,7 +525,8 @@ class MMDPhysicsWorld {
   /* Interpolate between prev and curr at factor f (0=prev, 1=curr).
    * Position uses Catmull-Rom (C1) when prev_prev is available so velocity
    * is continuous across batches; falls back to lerp (C0) otherwise.
-   * Rotation uses slerp (C0) — squad deferred for single-variable control. */
+   * Rotation uses squad (C1) when prev_prev is available, with slerp (C0)
+   * fallback on the first frame. */
   btTransform interpolate_kinematic_(const btTransform &prev_prev,
                                      const btTransform &prev,
                                      const btTransform &curr,
@@ -556,20 +557,14 @@ class MMDPhysicsWorld {
 
   /** Apply mmd_tools-style Non-Collision Constraint (NCC) filtering.
    *
-   * MMP alignment (2026-07-28): this function is now a no-op.
+   * This live path applies proximity-based filtering; it is not a no-op.
    *
-   * Previously it implemented mmd_tools `buildRigids`-style NCC: for pairs
-   * whose PMX `no_collision_group` declares "do NOT collide", disable the
+   * The live implementation applies mmd_tools `buildRigids`-style NCC for pairs
+   * whose PMX `no_collision_group` declares "do NOT collide", disabling the
    * pair via `setIgnoreCollisionCheck` if jointed or AABB-overlapping.
    *
-   * With the MMP broadphase alignment (Bullet `mask = no_collision_group`,
-   * treating PMX DISABLE mask as ENABLE mask due to mmd_tools importer
-   * double-inversion bug), broadphase already filters all pairs according
-   * to MMP's semantics. MMP's own `_build_non_collision_pairs` is fully
-   * covered by broadphase, so it is effectively a no-op. We mirror that
-   * here. Jointed-pair initial penetration is handled separately by
-   * `apply_joint_collision_exclusions_` using `contactPairTest`,
-   * restricted to broadphase-allowed pairs.
+   * This live filtering remains separate from the MMP-aligned broadphase
+   * masks and the no-op `apply_joint_collision_exclusions_` helper.
    *
    * Called once at the end of `initialize()` after all bodies and joints
    * exist. */

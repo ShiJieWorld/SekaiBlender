@@ -1093,7 +1093,9 @@ wmOperatorStatus physics_set_realtime_hz_exec(bContext *C, wmOperator *op)
     return OPERATOR_CANCELLED;
   }
   if (g_physics_scheduler != nullptr && !g_physics_scheduler->sessions.empty()) {
-    BKE_report(op->reports, RPT_ERROR, "MMD Physics: stop real-time physics before changing Hz");
+    BKE_report(op->reports,
+               RPT_ERROR,
+               "MMD Physics: stop real-time physics before changing substeps");
     return OPERATOR_CANCELLED;
   }
   Scene *scene = CTX_data_scene(C);
@@ -1102,9 +1104,8 @@ wmOperatorStatus physics_set_realtime_hz_exec(bContext *C, wmOperator *op)
   const int configured_substeps = scene_realtime_substeps_per_frame(scene);
   BKE_reportf(op->reports,
               RPT_INFO,
-              "MMD Physics: realtime preview set to %d substeps per frame (%.2f Hz)",
-              configured_substeps,
-              1.0 / (scene_seconds_per_frame(scene) / double(configured_substeps)));
+              "MMD Physics: realtime preview set to %d substeps per frame",
+              configured_substeps);
   return OPERATOR_FINISHED;
 }
 
@@ -4019,7 +4020,7 @@ void mmd_physics_panel_draw(const bContext *C, Panel *panel)
                                      scene_realtime_substeps_per_frame(scene);
     for (const int substeps : {3, 4, 5, 6}) {
       char label[16];
-      SNPRINTF(label, "%d Hz", int(std::round(scene_fps * double(substeps))));
+      SNPRINTF(label, "%d Steps", substeps);
       PointerRNA props = hz_row.op("WM_OT_mmd_physics_set_realtime_hz",
                                    label,
                                    substeps == current_substeps ? ICON_CHECKMARK : ICON_NONE);
@@ -4186,7 +4187,7 @@ void WM_OT_mmd_physics_use_bake_source(wmOperatorType *ot)
 
 void WM_OT_mmd_physics_set_realtime_hz(wmOperatorType *ot)
 {
-  ot->name = "Set MMD Physics Realtime Hz";
+  ot->name = "Set MMD Physics Realtime Substeps";
   ot->description = "Set fixed physics substeps per animation frame for real-time preview";
   ot->idname = "WM_OT_mmd_physics_set_realtime_hz";
   ot->exec = physics_set_realtime_hz_exec;
@@ -4345,7 +4346,7 @@ void WM_OT_mmd_physics_capture_diagnostics(wmOperatorType *ot)
   ot->idname = "WM_OT_mmd_physics_capture_diagnostics";
   ot->exec = physics_capture_diagnostics_exec;
   ot->poll = poll_armature;
-  ot->flag = OPTYPE_REGISTER;
+  ot->flag = OPTYPE_INTERNAL;
 
   RNA_def_boolean(ot->srna,
                   "disable_rigid_body_contacts",
@@ -4432,7 +4433,7 @@ void WM_OT_mmd_physics_export_definition(wmOperatorType *ot)
   ot->idname = "WM_OT_mmd_physics_export_definition";
   ot->exec = physics_export_definition_exec;
   ot->poll = poll_armature;
-  ot->flag = OPTYPE_REGISTER;
+  ot->flag = OPTYPE_INTERNAL;
 
   RNA_def_string(ot->srna,
                  "filepath",
@@ -4449,7 +4450,7 @@ void WM_OT_mmd_physics_snapshot_diagnostics(wmOperatorType *ot)
   ot->idname = "WM_OT_mmd_physics_snapshot_diagnostics";
   ot->exec = physics_snapshot_diagnostics_exec;
   ot->poll = poll_running_physics;
-  ot->flag = OPTYPE_REGISTER;
+  ot->flag = OPTYPE_INTERNAL;
 
   RNA_def_string(ot->srna,
                  "filepath",

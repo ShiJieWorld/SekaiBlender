@@ -412,8 +412,7 @@ void PMXReader::read_materials() {
     const int count = read_count("materials", 1, kMaxSectionItems);
     model_.materials.reserve(static_cast<size_t>(count));
     for (int i = 0; i < count; i++) {
-        PMXMaterial mat;
-        memset(&mat, 0, sizeof(mat));
+        PMXMaterial mat{};
         mat.texture_idx = mat.sphere_texture_idx = mat.toon_texture_idx = -1;
 
         mat.name_local = read_string();
@@ -448,8 +447,7 @@ void PMXReader::read_bones() {
     const int count = read_count("bones", 1, kMaxSectionItems);
     model_.bones.reserve(static_cast<size_t>(count));
     for (int i = 0; i < count; i++) {
-        PMXBone bone;
-        memset(&bone, 0, sizeof(bone));
+        PMXBone bone{};
         bone.parent_index = bone.tail_pos_bone = -1;
         bone.inherit_parent_index = bone.ik_target_index = bone.external_parent_index = -1;
 
@@ -502,8 +500,7 @@ void PMXReader::read_morphs() {
     const int count = read_count("morphs", 1, kMaxSectionItems);
     model_.morphs.reserve(static_cast<size_t>(count));
     for (int i = 0; i < count; i++) {
-        PMXMorph m;
-        memset(&m, 0, sizeof(m));
+        PMXMorph m{};
         m.name_local = read_string();
         m.name_universal = read_string();
         m.panel = r_.read_byte();

@@ -373,30 +373,10 @@ void MMDPhysicsWorld::create_world_()
   /* Residual early-out terminates the whole solver loop before constraints
    * with a larger per-constraint iteration override finish converging. */
   solver_info.m_leastSquaresResidualThreshold = btScalar(0.0);
-  /* F5j fix: disabled split impulse and CCD to match MikuMikuPhysics.
-   *
-   * Split impulse (`m_splitImpulse=true`) separates position correction
-   * from the velocity solver. For JOINT CONSTRAINTS this is harmful:
-   * the linear constraint's position error is corrected by the split
-   * impulse pass, but the velocity is NOT synchronously damped. The
-   * body retains the drift velocity, so a pendulum at rest gains
-   * ~1.87 rad/s in one 1/30s step from a 1.7mm linear constraint drift
-   * (gravity torque on the 4.66cm lever arm). This is the root cause
-   * of the cape/pendant "加速抖动" symptom.
-   *
-   * Without split impulse (MMP's configuration), Bullet uses Baumgarte
-   * stabilization: position correction is applied THROUGH velocity, so
-   * the velocity is properly damped and the pendulum stays at rest.
-   *
-   * CCD (`m_useContinuous=true`) is also disabled because MMP doesn't
-   * use it, and it can subdivide timesteps unpredictably for thin
-   * capsule shapes, adding noise to joint chains.
-   *
-   * The penetration these were meant to fix ("paper-like" skirt) was
-   * previously masked by the `m_maxLimitForce=0` override letting
-   * bodies spin freely to escape collision forces. With that override
-   * removed, the collision mask fix (F5i) handles penetration; split
-   * impulse / CCD are no longer needed and actively cause jitter. */
+  /* F5j note: this world uses Bullet's default split-impulse and CCD settings.
+   * No explicit split-impulse or continuous-collision override is applied here;
+   * keep the solver configuration honest and do not infer a disabled feature
+   * from the historical MikuMikuPhysics comparison. */
 }
 
 btCollisionShape *MMDPhysicsWorld::create_shape_(const MMDRigidBodyDefinition &def)
