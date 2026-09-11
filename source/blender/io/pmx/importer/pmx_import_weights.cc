@@ -191,10 +191,10 @@ void assign_vertex_weights_named(Object *obj,
   }
 
   /* Step 4: Normalize weights so each vertex's total sums to 1.0.
-   * PMX BDEF2/BDEF4 vertices may reference bone indices that are -1 (unused),
-   * leaving the assigned weights incomplete. Normalization compensates by
-   * scaling up the remaining weights to full influence, preventing partial
-   * deformation (stretching/tearing) at joint seams. */
+   * Unused BDEF2/BDEF4 slots are represented by zero weight and skipped above;
+   * a -1 bone index is rejected by the PMX reader. Normalization compensates
+   * for skipped zero-weight slots by scaling the remaining weights to full
+   * influence, preventing partial deformation at joint seams. */
   const int dvert_count = int(dvert_span.size());
   for (int vi = 0; vi < dvert_count; vi++) {
     MDeformVert &dv = dverts[vi];

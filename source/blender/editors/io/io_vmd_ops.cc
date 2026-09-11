@@ -187,21 +187,22 @@ static const EnumPropertyItem *vmd_target_armature_itemf(bContext *C,
 /* [世界的歌] When a VMD is imported, the motion file usually bakes MMD's
  * IK / append-transform / axis solve into per-bone keyframes. The Blender-side
  * approximations created by PMX auto-apply (or by the manual Apply operators)
- * would fight those baked curves, producing broken motion. So we suspend every
- * MMD_* approximation IK constraint (enforce = 0) after the VMD animation is
- * written. They can be re-enabled from the constraint panel or via the Apply
- * operators for manual posing.
+ * would fight those baked curves, producing broken motion. After the VMD
+ * animation is written, we suspend the approximate constraints that would
+ * fight the baked pose; eligible IK constraints may remain active for mixed
+ * chains or VMD IK-toggle tracks. They can be re-enabled from the constraint
+ * panel or via the Apply operators for manual posing.
  *
  * However, some VMD files are "mixed-type": certain IK chains (e.g. NXDE's
  * knee) have NO FK keyframes on chain bones — the knee only bends via IK
- * solving. Blindly suspending all IK constraints leaves such chains frozen
+ * solving. Blindly suspending all IK approximations leaves such chains frozen
  * (the knee stays straight, the leg only translates with the upper body).
  *
- * To support both pure-FK VMDs (suspend all IK) and mixed-type VMDs (keep IK
- * for chains lacking FK coverage), we inspect the just-built action's F-Curves
+ * To support both pure-FK VMDs (suspend IK approximations) and mixed-type VMDs
+ * (keep IK for chains lacking FK coverage), we inspect the just-built action's F-Curves
  * per IK chain: if EVERY chain-link bone has its own rotation F-Curve, the
  * chain is pure-FK-baked → suspend; otherwise keep the IK constraint active so
- * the E-phase CCD solver can bend the chain. */
+ * the POSE_DONE native CCD evaluator can bend the chain. */
 
 /** Check whether any F-Curve in the action drives a *meaningful* rotation
  *  channel of the given bone. Matches data paths of the form:
@@ -215,7 +216,7 @@ static const EnumPropertyItem *vmd_target_armature_itemf(bContext *C,
  *  keyframe (or several identical ones) for bones that are meant to be driven
  *  by IK solving rather than by FK curves. Treating such placeholder curves as
  *  "no FK rotation" is what lets mixed-type VMDs keep their IK chains active so
- *  the E-phase CCD solver can bend the knee/ankle. Without this check every
+ *  the POSE_DONE native CCD evaluator can bend the knee/ankle. Without this check every
  *  chain-link bone with a placeholder curve would be misclassified as
  *  pure-FK-baked, and the IK constraint would be wrongly suspended — freezing
  *  the knee straight while the IK target bone keeps translating. */
@@ -304,8 +305,11 @@ static bool action_has_ik_toggle_fcurves(const bAction &action, const AnimData &
   return false;
 }
 
-static int vmd_suspend_mmd_approx_constraints(Main *bmain, Object *ob)
+static int vmd_suspend_mmd_approx_constraints(Main *bmain, Object *ob, int *r_kept)
 {
+  if (r_kept != nullptr) {
+    *r_kept = 0;
+  }
   if (ob->pose == nullptr) {
     return 0;
   }
@@ -315,7 +319,7 @@ static int vmd_suspend_mmd_approx_constraints(Main *bmain, Object *ob)
   const bool has_ik_def = io::pmx::read_bone_ik_definition(ob->id, ik_def);
 
   /* Detect whether the VMD shipped a property (IK toggle) track.
-   * If it did, the E-phase CCD solver will read the per-frame toggle value
+   * If it did, the POSE_DONE native CCD evaluator will read the per-frame toggle value
    * from the `mmd_ik_toggle` F-Curves and decide itself whether to solve each
    * chain. In that case we keep native IK enabled on every IK control bone and
    * skip the mixed-chain heuristic entirely.
@@ -335,7 +339,7 @@ static int vmd_suspend_mmd_approx_constraints(Main *bmain, Object *ob)
    * the whole chain to stay on IK. */
   std::set<std::string> mixed_chain_link_bones;
   /* Set of IK control bone names (def.bone_name) for mixed-type chains.
-   * These keep native CCD IK enabled so the E-phase solver can bend them. */
+   * These keep native CCD IK enabled so the POSE_DONE native CCD evaluator can bend them. */
   std::set<std::string> mixed_ik_bone_names;
   if (!has_vmd_ik_toggle && has_ik_def && ob->adt && ob->adt->action) {
     bAction &action = *ob->adt->action;
@@ -360,7 +364,7 @@ static int vmd_suspend_mmd_approx_constraints(Main *bmain, Object *ob)
   /* Toggle native CCD IK per IK control bone.
    *
    * When the VMD ships an IK toggle track, keep native IK enabled on every IK
-   * control bone — the E-phase CCD solver will read the per-frame toggle value
+   * control bone — the POSE_DONE native CCD evaluator will read the per-frame toggle value
    * from the `mmd_ik_toggle` F-Curve and skip solving when the VMD says IK off.
    * This mirrors mmd_tools, which lets the VMD property track drive IK on/off
    * per frame.
@@ -438,7 +442,7 @@ static int vmd_suspend_mmd_approx_constraints(Main *bmain, Object *ob)
       {
         continue;
       }
-      /* When the VMD ships an IK toggle track, keep ALL IK constraints active.
+      /* When the VMD ships an IK toggle track, keep the IK approximations active.
        * The MMD_IK_Approx constraint (Blender native iTaSC IK) will override
        * FK rotations when IK is on, and yield to FK when IK is off — the
        * per-frame toggle is driven by the MMD_IK_Approx influence F-Curve
@@ -467,6 +471,9 @@ static int vmd_suspend_mmd_approx_constraints(Main *bmain, Object *ob)
   if (suspended > 0 || kept > 0) {
     DEG_id_tag_update_ex(bmain, &ob->id, ID_RECALC_GEOMETRY | ID_RECALC_TRANSFORM);
     DEG_relations_tag_update(bmain);
+  }
+  if (r_kept != nullptr) {
+    *r_kept = kept;
   }
   return suspended;
 }
@@ -804,15 +811,16 @@ wmOperatorStatus wm_vmd_import_exec(bContext *C, wmOperator *op)
 
   /* Suspend MMD approximate constraints: VMD bakes its own solve, so the
    * Blender-side approximations must yield to avoid fighting the baked curves. */
-  const int suspended = vmd_suspend_mmd_approx_constraints(bmain, target);
-  if (suspended > 0) {
+  int kept = 0;
+  const int suspended = vmd_suspend_mmd_approx_constraints(bmain, target, &kept);
+  if (suspended > 0 || kept > 0) {
     BKE_reportf(op->reports,
                 RPT_INFO,
-                "Suspended %d MMD IK constraints. "
-                "Append/Fixed/Local kept active for D bone tracking. "
-                "Re-enable via the constraint panel or Apply operators for "
-                "manual posing.",
-                suspended);
+                "Suspended %d approximate constraints, kept %d IK constraints. "
+                "Local/Fixed axis approximations are suspended for VMD playback. "
+                "Re-enable via the constraint panel or Apply operators for manual posing.",
+                suspended,
+                kept);
   }
 
   if (AnimData *anim_data = BKE_animdata_from_id(&target->id)) {

@@ -9,17 +9,11 @@
  * MMD native CCD IK after FCurves and constraints have been applied.
  *
  * ─────────────────────────────────────────────────────────────────
- * FROZEN (2026-07-25): VMD import no longer uses this CCD solver.
- * VMD 大角度兼容性已改用 iTaSC + influence F-Curve 方案（见
- * io_vmd_ops.cc vmd_suspend_mmd_approx_constraints + vmd_import.cc
- * apply_vmd_ik_toggle）。该方案已稳定复现 mmd_tools 导入效果。
- *
- * CCD 求解器目前仅用于实时 IK 模式（手动拖动 IK 控制骨），通过
- * itasc_plugin.cc 的 is_native_mmd_ik_approx() 排除 iTaSC 后由
- * POSE_DONE 阶段接管。不要在 VMD 路径重新启用此 solver。
- *
- * 若未来遇到 iTaSC 无法处理的特殊 IK 链，可重新激活此代码。
- * 详见 project_memory.md「iTaSC influence 驱动方案」段。
+ * The native V8 solver is the default path. POSE_DONE enters this evaluator
+ * for both interactive posing and VMD playback; the V8 path mutes the
+ * approximate iTaSC IK constraint so the two solvers do not double-write a
+ * chain. Set MMD_CCD_V8=0 for the V2 fallback, or use MMD_IK_LEGACY=1 for
+ * the legacy mute/restore path.
  * ─────────────────────────────────────────────────────────────────
  */
 

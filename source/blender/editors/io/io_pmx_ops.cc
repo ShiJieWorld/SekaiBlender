@@ -753,9 +753,11 @@ static void mmd_organize_bone_collections(Object *ob)
 
 /* [世界的歌] D1 / Q4: Manual editor operator that creates Blender IK constraints
  * (named MMD_IK_Approx, marked mmd_approximate) to *approximate* MMD CCD IK.
- * This is strictly opt-in and must never run during PMX import (red line 145).
- * The real MMD CCD solver is rebuilt in the E phase and consumes the persisted
- * mmd_pmx_bone_ik_definition + per-bone mmd_ik_toggle instead. */
+ * Manual F3 use is strictly opt-in and remains an approximation, not native
+ * MMD CCD. During PMX import, the RNA auto_apply_mmd_approximations switch
+ * invokes the import-time approximation path; native CCD consumes the
+ * persisted mmd_pmx_bone_ik_definition + per-bone mmd_ik_toggle. V8 skips
+ * this approximate IK application. */
 static bool wm_pmx_apply_ik_poll(bContext *C)
 {
   Object *ob = CTX_data_active_object(C);
@@ -908,7 +910,7 @@ static wmOperatorStatus wm_pmx_apply_ik_exec(bContext *C, wmOperator *op)
       limit_pchan->limitmax[2] = lim->zmax;
     }
 
-    /* Mark the pose bone so the approximate nature is queryable (red line 145). */
+    /* Mark the pose bone so the approximate nature is queryable. */
     IDProperty *pchan_props = pchan->system_properties;
     if (pchan_props == nullptr) {
       pchan_props = blender::bke::idprop::create_group("mmd_ik_approx").release();
@@ -941,8 +943,9 @@ static wmOperatorStatus wm_pmx_apply_ik_exec(bContext *C, wmOperator *op)
 
 /* [世界的歌] D2 / Q4: Manual editor operator that creates Blender Transformation
  * constraints (MMD_Append_Rotation / MMD_Append_Translation) to *approximate*
- * MMD append transform (追加変換). Strictly opt-in; must never run during PMX
- * import (red line D2-a). The real native append solver is rebuilt in the E phase.
+ * MMD append transform (追加変換). Manual F3 use is opt-in; the import path
+ * invokes approximations through the RNA auto_apply_mmd_approximations switch.
+ * The native append behavior is rebuilt in the E phase.
  * Ratio sign (incl. negative "cancel") is carried by the to_min/to_max range;
  * influence (enforce) stays 1.0. */
 static bool wm_pmx_apply_append_transform_poll(bContext *C)
@@ -1054,7 +1057,7 @@ static wmOperatorStatus wm_pmx_apply_append_transform_exec(bContext *C, wmOperat
       build_transform("MMD_Append_Translation", TRANS_LOCATION);
     }
 
-    /* Mark the pose bone so the approximate nature is queryable (red line D2-a). */
+    /* Mark the pose bone so the approximate nature is queryable. */
     IDProperty *pchan_props = pchan->system_properties;
     if (pchan_props == nullptr) {
       pchan_props = blender::bke::idprop::create_group("mmd_append").release();
@@ -1122,8 +1125,9 @@ void WM_OT_pmx_apply_append_transform(wmOperatorType *ot)
  * Principal axes (±X/±Y/±Z) are applied as a native `protectflag` lock
  * (exact, no constraint). Arbitrary axes fall back to a Limit Rotation
  * constraint (`MMD_Fixed_Axis_Approx`, marked `mmd_approximate`) as an
- * approximation. Strictly opt-in; must never run during PMX import (red line
- * D3-a). The real native fixed-axis solve is rebuilt in the E phase. */
+ * approximation. Manual F3 use is opt-in; the import path invokes this
+ * approximation through the RNA auto_apply_mmd_approximations switch. The
+ * native fixed-axis behavior is rebuilt in the E phase. */
 static bool wm_pmx_apply_fixed_axis_poll(bContext *C)
 {
   Object *ob = CTX_data_active_object(C);

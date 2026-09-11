@@ -120,13 +120,13 @@ struct PMXMaterial {
 
 // Bone flags (from MMD spec)
 enum BoneFlag : uint16_t {
-    BONE_FLAG_TAIL_POS         = 0x0001,  // Tail position is a position (else bone index)
+    BONE_FLAG_TAIL_POS         = 0x0001,  // Tail is a bone index (else position offset)
     BONE_FLAG_ROTATABLE        = 0x0002,
     BONE_FLAG_TRANSLATABLE     = 0x0004,
     BONE_FLAG_VISIBLE          = 0x0008,
     BONE_FLAG_ENABLED          = 0x0010,
     BONE_FLAG_IK               = 0x0020,
-    // 0x0040 = ?, 0x0080 = ?
+    // 0x0040 is unused; 0x0080 is local grant (no extra payload decoded).
     BONE_FLAG_APPEND_ROTATION  = 0x0100,  // Inherit rotation
     BONE_FLAG_APPEND_TRANSLATE = 0x0200,  // Inherit translation
     BONE_FLAG_FIXED_AXIS       = 0x0400,
@@ -151,12 +151,12 @@ struct PMXBone {
     float tail_pos_offset[3];  // valid when tail_pos_bone == -2 (position mode)
     int transform_order;  // deformation层级
     uint16_t flag;
-    // For 0x0080/0x0100 (inherit):
+    // For 0x0100/0x0200 (inherit):
     int inherit_parent_index;
     float inherit_parent_ratio;
-    // For 0x0200 (fixed axis):
+    // For 0x0400 (fixed axis):
     float fixed_axis[3];
-    // For 0x0400 (local axis):
+    // For 0x0800 (local axis):
     float local_x[3];
     float local_z[3];
     // For 0x0020 (IK):
@@ -164,7 +164,7 @@ struct PMXBone {
     int ik_loop_count;
     float ik_angle_limit;
     std::vector<PMXIKLink> ik_links;
-    // For 0x1000 (external parent):
+    // For 0x2000 (external parent):
     int external_parent_index;
 };
 
