@@ -138,16 +138,24 @@ void node_tree_composit_default_init(const bContext *C, bNodeTree *ntree)
    * visible area.*/
   composite->location[1] = 100.0f;
 
-  bNode *in = bke::node_add_node(C, *ntree, "NodeGroupInput"_ustr);
+  /* SekaiBlender: keep the 5.2 scene-compositor default (Render Layers) instead
+   * of 5.3's Group Input (fa5c7fd6f / PR 161130). Group Input is still the
+   * correct seed for VSE compositor groups. */
+  bNode *in = bke::node_add_static_node(C, *ntree, CMP_NODE_R_LAYERS);
   in->location[0] = -150.0f - in->width;
   in->location[1] = 100.0f;
   bke::node_set_active(*ntree, *in);
+  in->flag &= ~NODE_PREVIEW;
 
-  bke::node_add_link(*ntree,
-                     *in,
-                     *reinterpret_cast<bNodeSocket *>(in->outputs.first),
-                     *composite,
-                     *reinterpret_cast<bNodeSocket *>(composite->inputs.first));
+  bNodeSocket *image_out = reinterpret_cast<bNodeSocket *>(in->outputs.first);
+  bke::node_add_link(
+      *ntree, *in, *image_out, *composite, *reinterpret_cast<bNodeSocket *>(composite->inputs.first));
+
+  bNode *viewer = bke::node_add_static_node(C, *ntree, CMP_NODE_VIEWER);
+  viewer->location[0] = 200.0f;
+  viewer->location[1] = -80.0f;
+  bke::node_add_link(
+      *ntree, *in, *image_out, *viewer, *reinterpret_cast<bNodeSocket *>(viewer->inputs.first));
 
   BKE_ntree_update_after_single_tree_change(*CTX_data_main(C), *ntree);
 }
