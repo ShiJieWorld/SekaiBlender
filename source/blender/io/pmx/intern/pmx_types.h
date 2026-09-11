@@ -78,8 +78,9 @@ struct PMXTexture {
 
 enum class SphereMode : uint8_t {
     None = 0,
-    Sphere = 1,   // s = sphere (matcap)
-    Cube = 2,     // spa = environment
+    Sphere = 1,   // sph = multiply / matcap
+    Cube = 2,     // spa = add / environment
+    SubTex = 3,   // additional-UV subtexture (PMX spec / mmd_tools SPHERE_MODE_SUBTEX)
 };
 
 // Material flags (PMXMaterial::flag bitfield, from the MMD spec).

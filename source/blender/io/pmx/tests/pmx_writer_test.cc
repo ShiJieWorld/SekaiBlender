@@ -833,6 +833,16 @@ TEST_F(PMXWriterTest, rejects_weight_arrays_that_are_too_short)
   EXPECT_THROW(PMXWriter::write_to_memory(model, {}), PMXWriterError);
 }
 
+TEST_F(PMXWriterTest, round_trips_subtexture_sphere_mode)
+{
+  PMXModel model = make_round_trip_model();
+  model.materials[0].sphere_mode = SphereMode::SubTex;
+  model.materials[0].sphere_texture_idx = 0;
+  const PMXModel reloaded = write_then_read(model, {});
+  EXPECT_EQ(int(reloaded.materials[0].sphere_mode), int(SphereMode::SubTex));
+  EXPECT_EQ(reloaded.materials[0].sphere_texture_idx, 0);
+}
+
 TEST_F(PMXWriterTest, rejects_invalid_enumerations)
 {
   PMXModel bad_sphere = make_round_trip_model();

@@ -460,7 +460,7 @@ void PMXWriter::write_materials()
         write_texture_index(mat.sphere_texture_idx, "material sphere texture index");
 
         const uint8_t sphere_mode = static_cast<uint8_t>(mat.sphere_mode);
-        if (sphere_mode > uint8_t(SphereMode::Cube)) {
+        if (sphere_mode > uint8_t(SphereMode::SubTex)) {
             throw PMXWriterError("Invalid sphere mode: " + std::to_string(sphere_mode));
         }
         w_.write_byte(sphere_mode);
