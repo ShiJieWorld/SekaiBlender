@@ -624,16 +624,16 @@ static void mmd_ccd_v8_evaluate(Depsgraph *depsgraph,
     vb.base_pos_mmd[1] = bone->arm_head[2] / global_scale;
     vb.base_pos_mmd[2] = bone->arm_head[1] / global_scale;
 
-    /* q_base_mmd: 从 pchan->quat 提取旋转（VMD 动画层 F-Curve 值，未被 constraints/iTaSC 污染），
-     *   BoneConverter 逆变换到 MMD 空间。反编译结论 §5: type-4 IK link q_base = 动画插值层 0x154。
-     *   注意：不能用 pchan->chan_mat，chan_mat 已被 iTaSC/MMD_IK_Approx 求解污染。
-     *   bl→mmd: conj(q_conv) * bl_quat * q_conv */
+    /* q_base_mmd: animation-layer rotation, converted into MMD space.
+     * Decompile §5: type-4 IK link q_base is the interpolation layer, not the
+     * already-solved pose. Do not use chan_mat (iTaSC/Approx) and do not use
+     * pchan->quat when there is no F-Curve — POSE_DONE writes last frame's CCD
+     * result there, which turns interactive IK-parent posing into feedback
+     * (leg twitch / snap-back). Rest pose is identity in channel space.
+     * bl→mmd: conj(q_conv) * bl_quat * q_conv */
     float bl_quat[4];
-    /* Read the active animation rotation mode.  The raw quat field is not
-     * authoritative for Euler and axis-angle pose channels. */
     if (!v8_read_action_rotation(armature_obj, *pchan, eval_time, bl_quat)) {
-      const float4 bl_quat_value = BKE_pchan_rot_to_quat(*pchan);
-      copy_qt_qt(bl_quat, bl_quat_value);
+      unit_qt(bl_quat);
     }
     normalize_qt(bl_quat);
 
