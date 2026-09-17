@@ -14,6 +14,7 @@ struct ARegionType;
 namespace blender {
 
 void WM_OT_mmd_edge_preview_setup(wmOperatorType *ot);
+void WM_OT_mmd_basic_toon_setup(wmOperatorType *ot);
 void WM_OT_mmd_render_set_panel_language(wmOperatorType *ot);
 
 /**

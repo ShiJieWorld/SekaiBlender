@@ -8,8 +8,11 @@
  * MMD render features for imported PMX models, plus their own "MMD Render"
  * N-panel tab in the View3D sidebar (kept separate from "MMD Physics").
  *
- * Currently this provides the PMX toon-edge (outline) preview, rebuilt to match
- * `mmd_tools` (operators/material.py: `EdgePreviewSetup`) exactly:
+ * Currently this provides two independent previews, kept in separate sidebar
+ * sub-panels so they never share materials or modifiers:
+ *
+ * 1. PMX toon-edge (outline), rebuilt to match `mmd_tools`
+ *    (operators/material.py: `EdgePreviewSetup`) exactly:
  *
  * - The original PMX material is never modified. Edge geometry is a *separate*
  *   material appended after all original slots, plus one `Solidify` modifier
@@ -20,6 +23,13 @@
  * - The edge material's shader is the `MMDEdgePreview` node group: a
  *   Light Path / Backfacing test that keeps the flipped shell visible only from
  *   camera rays, mixing a Transparent BSDF with a Background of the edge color.
+ *
+ * 2. Basic toon (`基础三渲二`): an EEVEE Shader-to-RGB hard-shadow group
+ *    applied to original PMX materials (never to `mmd_edge.*` slots). Base
+ *    texture Color drives light/dark/overall plus attach colors. BLEND
+ *    materials that already have Principled Alpha keep that alpha through a
+ *    Transparent Mix Shader. Applying also sets the scene look to AgX High
+ *    Contrast. This is an optional preview, not the PMX import default.
  */
 
 #include "io_mmd_render_ops.hh"
@@ -29,6 +39,7 @@
 #include <cmath>
 #include <string>
 
+#include "DNA_colorband_types.h"
 #include "DNA_material_types.h"
 #include "DNA_mesh_types.h"
 #include "DNA_meshdata_types.h"
@@ -39,6 +50,7 @@
 #include "DNA_screen_types.h"
 
 #include "BKE_attribute.hh"
+#include "BKE_colorband.hh"
 #include "BKE_context.hh"
 #include "BKE_deform.hh"
 #include "BKE_idprop.hh"
@@ -111,6 +123,27 @@ constexpr float kEdgeThicknessFallback = 0.08f;
  * is still parsed as metadata, but does not override this default appearance. */
 constexpr std::array<float, 4> kDefaultEdgeColor = {0.0f, 0.0f, 0.0f, 1.0f};
 
+/* Basic toon (`基础三渲二`) preview — independent of the edge shell. */
+constexpr const char *kBasicToonNodeGroup = "基础三渲二";
+constexpr const char *kBasicToonGroupNodeName = "基础三渲二";
+constexpr const char *kBasicToonAlphaMixName = "MMD Toon Alpha Mix";
+constexpr const char *kBasicToonTransparentName = "MMD Toon Transparent";
+constexpr const char *kPMXBaseTextureNodeName = "PMX Base Texture";
+constexpr const char *kAgXViewTransform = "AgX";
+constexpr const char *kAgXHighContrastLook = "AgX - High Contrast";
+constexpr float kToonLightSat = 1.2f;
+constexpr float kToonLightVal = 1.5f;
+constexpr float kToonDarkSat = 2.0f;
+constexpr float kToonDarkVal = 0.0f;
+constexpr float kToonOverallSat = 2.0f;
+constexpr float kToonOverallVal = 0.5f;
+constexpr float kToonOverallGamma = 1.0f;
+constexpr float kToonRampStops[3][5] = {
+    {1.0f, 1.0f, 1.0f, 1.0f, 0.05091f},
+    {0.62417f, 0.62417f, 0.62417f, 1.0f, 0.07818f},
+    {0.0f, 0.0f, 0.0f, 1.0f, 0.09455f},
+};
+
 /* ----------------------------------------------------------------- */
 /* Panel language. Shared with the MMD Physics panel so both sidebar  */
 /* tabs follow one setting.                                          */
@@ -137,6 +170,10 @@ struct MMDRenderPanelText {
   const char *create_edge;
   const char *clean_edge;
   const char *status_format;
+  const char *basic_toon;
+  const char *create_toon;
+  const char *clean_toon;
+  const char *toon_status_format;
   const char *no_model;
 };
 
@@ -148,6 +185,10 @@ const MMDRenderPanelText &mmd_render_panel_text(const MMDRenderPanelLanguage lan
       "生成描边",
       "清除描边",
       "可描边网格: %d / %d",
+      "基础三渲二",
+      "套用三渲二",
+      "清除三渲二",
+      "可套用材质: %d / %d",
       "请选择一个 PMX 模型",
   };
   static const MMDRenderPanelText english = {
@@ -156,6 +197,10 @@ const MMDRenderPanelText &mmd_render_panel_text(const MMDRenderPanelLanguage lan
       "Create Edge",
       "Clean Edge",
       "Edge-capable meshes: %d / %d",
+      "Basic Toon",
+      "Apply Toon",
+      "Clean Toon",
+      "Toon-capable materials: %d / %d",
       "Select a PMX model",
   };
   static const MMDRenderPanelText japanese = {
@@ -164,6 +209,10 @@ const MMDRenderPanelText &mmd_render_panel_text(const MMDRenderPanelLanguage lan
       "輪郭を作成",
       "輪郭を削除",
       "輪郭可能メッシュ: %d / %d",
+      "基本トゥーン",
+      "トゥーンを適用",
+      "トゥーンを削除",
+      "適用可能マテリアル: %d / %d",
       "PMX モデルを選択してください",
   };
   switch (language) {
@@ -438,6 +487,569 @@ bNodeTree *ensure_edge_preview_node_group(Main *bmain)
 
   BKE_main_ensure_invariants(*bmain, group->id);
   return group;
+}
+
+/* ----------------------------------------------------------------- */
+/* Basic toon (`基础三渲二`) — independent of the edge shell.        */
+/* ----------------------------------------------------------------- */
+
+void set_float_socket(bNodeSocket *socket, const float value)
+{
+  if (socket != nullptr) {
+    socket->default_value_typed<bNodeSocketValueFloat>()->value = value;
+  }
+}
+
+void configure_mix_rgba(bNode &node, const float factor)
+{
+  NodeShaderMix *storage = static_cast<NodeShaderMix *>(node.storage);
+  if (storage != nullptr) {
+    storage->data_type = SOCK_RGBA;
+    storage->factor_mode = NODE_MIX_MODE_UNIFORM;
+    storage->clamp_factor = 1;
+    storage->clamp_result = 0;
+    storage->blend_type = MA_RAMP_BLEND;
+  }
+  set_float_socket(bke::node_find_socket(node, SOCK_IN, "Factor_Float"_ustr), factor);
+}
+
+bNodeSocket *mix_in(bNode &node, const char *identifier)
+{
+  return bke::node_find_socket(node, SOCK_IN, UString(identifier));
+}
+
+bNodeSocket *mix_out_color(bNode &node)
+{
+  return bke::node_find_socket(node, SOCK_OUT, "Result_Color"_ustr);
+}
+
+void set_interface_float_default(bNodeTreeInterfaceSocket *socket, const float value)
+{
+  if (socket == nullptr) {
+    return;
+  }
+  if (auto *data = static_cast<bNodeSocketValueFloat *>(socket->socket_data)) {
+    data->value = value;
+  }
+}
+
+void set_interface_rgba_default(
+    bNodeTreeInterfaceSocket *socket, const float r, const float g, const float b, const float a)
+{
+  if (socket == nullptr) {
+    return;
+  }
+  if (auto *data = static_cast<bNodeSocketValueRGBA *>(socket->socket_data)) {
+    data->value[0] = r;
+    data->value[1] = g;
+    data->value[2] = b;
+    data->value[3] = a;
+  }
+}
+
+bNodeTree *ensure_basic_toon_node_group(Main *bmain)
+{
+  if (bmain == nullptr) {
+    return nullptr;
+  }
+  if (ID *existing = BKE_libblock_find_name(bmain, ID_NT, kBasicToonNodeGroup)) {
+    bNodeTree *group = reinterpret_cast<bNodeTree *>(existing);
+    if (group->nodes.first != nullptr) {
+      return group;
+    }
+  }
+
+  bNodeTree *group = bke::node_tree_add_tree(bmain, kBasicToonNodeGroup, "ShaderNodeTree");
+  if (group == nullptr) {
+    return nullptr;
+  }
+
+  bNodeTreeInterfaceSocket *io_out = group->tree_interface.add_socket(
+      "颜色", "", "NodeSocketColor", NODE_INTERFACE_SOCKET_OUTPUT, nullptr);
+  bNodeTreeInterfaceSocket *io_light = group->tree_interface.add_socket(
+      "光部颜色", "", "NodeSocketColor", NODE_INTERFACE_SOCKET_INPUT, nullptr);
+  bNodeTreeInterfaceSocket *io_light_attach = group->tree_interface.add_socket(
+      "光部附着色", "", "NodeSocketColor", NODE_INTERFACE_SOCKET_INPUT, nullptr);
+  bNodeTreeInterfaceSocket *io_light_sat = group->tree_interface.add_socket(
+      "光部饱和度", "", "NodeSocketFloat", NODE_INTERFACE_SOCKET_INPUT, nullptr);
+  bNodeTreeInterfaceSocket *io_light_val = group->tree_interface.add_socket(
+      "光部明度", "", "NodeSocketFloat", NODE_INTERFACE_SOCKET_INPUT, nullptr);
+  bNodeTreeInterfaceSocket *io_dark = group->tree_interface.add_socket(
+      "暗部颜色", "", "NodeSocketColor", NODE_INTERFACE_SOCKET_INPUT, nullptr);
+  bNodeTreeInterfaceSocket *io_dark_attach = group->tree_interface.add_socket(
+      "暗部附着色", "", "NodeSocketColor", NODE_INTERFACE_SOCKET_INPUT, nullptr);
+  bNodeTreeInterfaceSocket *io_dark_sat = group->tree_interface.add_socket(
+      "暗部饱和度", "", "NodeSocketFloat", NODE_INTERFACE_SOCKET_INPUT, nullptr);
+  bNodeTreeInterfaceSocket *io_dark_val = group->tree_interface.add_socket(
+      "暗部明度", "", "NodeSocketFloat", NODE_INTERFACE_SOCKET_INPUT, nullptr);
+  bNodeTreeInterfaceSocket *io_all = group->tree_interface.add_socket(
+      "整体颜色", "", "NodeSocketColor", NODE_INTERFACE_SOCKET_INPUT, nullptr);
+  bNodeTreeInterfaceSocket *io_all_sat = group->tree_interface.add_socket(
+      "整体饱和度", "", "NodeSocketFloat", NODE_INTERFACE_SOCKET_INPUT, nullptr);
+  bNodeTreeInterfaceSocket *io_all_val = group->tree_interface.add_socket(
+      "整体明度", "", "NodeSocketFloat", NODE_INTERFACE_SOCKET_INPUT, nullptr);
+  bNodeTreeInterfaceSocket *io_gamma = group->tree_interface.add_socket(
+      "整体伽马", "", "NodeSocketFloat", NODE_INTERFACE_SOCKET_INPUT, nullptr);
+  if (io_out == nullptr || io_light == nullptr || io_light_attach == nullptr ||
+      io_light_sat == nullptr || io_light_val == nullptr || io_dark == nullptr ||
+      io_dark_attach == nullptr || io_dark_sat == nullptr || io_dark_val == nullptr ||
+      io_all == nullptr || io_all_sat == nullptr || io_all_val == nullptr || io_gamma == nullptr)
+  {
+    return nullptr;
+  }
+
+  set_interface_rgba_default(io_light, 0.9734f, 0.6584f, 0.5271f, 1.0f);
+  set_interface_rgba_default(io_light_attach, 0.0f, 0.0f, 0.0f, 1.0f);
+  set_interface_float_default(io_light_sat, kToonLightSat);
+  set_interface_float_default(io_light_val, kToonLightVal);
+  set_interface_rgba_default(io_dark, 0.9734f, 0.6584f, 0.5271f, 1.0f);
+  set_interface_rgba_default(io_dark_attach, 0.0f, 0.0f, 0.0f, 1.0f);
+  set_interface_float_default(io_dark_sat, kToonDarkSat);
+  set_interface_float_default(io_dark_val, kToonDarkVal);
+  set_interface_rgba_default(io_all, 0.5f, 0.5f, 0.5f, 1.0f);
+  set_interface_float_default(io_all_sat, kToonOverallSat);
+  set_interface_float_default(io_all_val, kToonOverallVal);
+  set_interface_float_default(io_gamma, kToonOverallGamma);
+
+  bNode *group_input = bke::node_add_node(nullptr, *group, "NodeGroupInput"_ustr);
+  bNode *group_output = bke::node_add_node(nullptr, *group, "NodeGroupOutput"_ustr);
+  group_input->location[0] = -900.0f;
+  group_input->location[1] = 0.0f;
+  group_output->location[0] = 1100.0f;
+  group_output->location[1] = 80.0f;
+
+  bNode *diffuse = add_shader_node(*group, SH_NODE_BSDF_DIFFUSE, -680.0f, 280.0f);
+  bNode *to_rgb = add_shader_node(*group, SH_NODE_SHADERTORGB, -460.0f, 280.0f);
+  bNode *ramp = add_shader_node(*group, SH_NODE_VALTORGB, -240.0f, 280.0f);
+  bNode *hsv_light = add_shader_node(*group, SH_NODE_HUE_SAT, -680.0f, 40.0f);
+  bNode *hsv_dark = add_shader_node(*group, SH_NODE_HUE_SAT, -680.0f, -180.0f);
+  bNode *hsv_all = add_shader_node(*group, SH_NODE_HUE_SAT, -680.0f, -400.0f);
+  bNode *mix_light = add_shader_node(*group, SH_NODE_MIX, -400.0f, 40.0f);
+  bNode *mix_dark = add_shader_node(*group, SH_NODE_MIX, -400.0f, -180.0f);
+  bNode *mix_ld = add_shader_node(*group, SH_NODE_MIX, 40.0f, 80.0f);
+  bNode *mix_all = add_shader_node(*group, SH_NODE_MIX, 320.0f, 40.0f);
+  bNode *gamma = add_shader_node(*group, SH_NODE_GAMMA, 560.0f, 80.0f);
+
+  configure_mix_rgba(*mix_light, 0.5f);
+  configure_mix_rgba(*mix_dark, 0.5f);
+  configure_mix_rgba(*mix_ld, 0.5f);
+  configure_mix_rgba(*mix_all, 0.5f);
+
+  set_float_socket(bke::node_find_socket(*diffuse, SOCK_IN, "Roughness"_ustr), 0.0f);
+  set_float_socket(bke::node_find_socket(*hsv_light, SOCK_IN, "Hue"_ustr), 0.5f);
+  set_float_socket(bke::node_find_socket(*hsv_light, SOCK_IN, "Fac"_ustr), 1.0f);
+  set_float_socket(bke::node_find_socket(*hsv_dark, SOCK_IN, "Hue"_ustr), 0.5f);
+  set_float_socket(bke::node_find_socket(*hsv_dark, SOCK_IN, "Fac"_ustr), 1.0f);
+  set_float_socket(bke::node_find_socket(*hsv_all, SOCK_IN, "Hue"_ustr), 0.5f);
+  set_float_socket(bke::node_find_socket(*hsv_all, SOCK_IN, "Fac"_ustr), 1.0f);
+
+  if (ColorBand *coba = static_cast<ColorBand *>(ramp->storage)) {
+    BKE_colorband_init(coba, false);
+    coba->ipotype = COLBAND_INTERP_CONSTANT;
+    coba->tot = 3;
+    for (const int i : IndexRange(3)) {
+      coba->data[i].r = kToonRampStops[i][0];
+      coba->data[i].g = kToonRampStops[i][1];
+      coba->data[i].b = kToonRampStops[i][2];
+      coba->data[i].a = kToonRampStops[i][3];
+      coba->data[i].pos = kToonRampStops[i][4];
+    }
+  }
+
+  BKE_main_ensure_invariants(*bmain, group->id);
+
+  auto in_sock = [&](bNodeTreeInterfaceSocket *io) {
+    return bke::node_find_socket(*group_input, SOCK_OUT, UString(io->identifier));
+  };
+  bNodeSocket *in_light = in_sock(io_light);
+  bNodeSocket *in_light_attach = in_sock(io_light_attach);
+  bNodeSocket *in_light_sat = in_sock(io_light_sat);
+  bNodeSocket *in_light_val = in_sock(io_light_val);
+  bNodeSocket *in_dark = in_sock(io_dark);
+  bNodeSocket *in_dark_attach = in_sock(io_dark_attach);
+  bNodeSocket *in_dark_sat = in_sock(io_dark_sat);
+  bNodeSocket *in_dark_val = in_sock(io_dark_val);
+  bNodeSocket *in_all = in_sock(io_all);
+  bNodeSocket *in_all_sat = in_sock(io_all_sat);
+  bNodeSocket *in_all_val = in_sock(io_all_val);
+  bNodeSocket *in_gamma = in_sock(io_gamma);
+  bNodeSocket *out_color = bke::node_find_socket(
+      *group_output, SOCK_IN, UString(io_out->identifier));
+
+  bNodeSocket *diff_bsdf = bke::node_find_socket(*diffuse, SOCK_OUT, "BSDF"_ustr);
+  bNodeSocket *to_rgb_in = bke::node_find_socket(*to_rgb, SOCK_IN, "Shader"_ustr);
+  bNodeSocket *to_rgb_out = bke::node_find_socket(*to_rgb, SOCK_OUT, "Color"_ustr);
+  bNodeSocket *ramp_fac = bke::node_find_socket(*ramp, SOCK_IN, "Fac"_ustr);
+  bNodeSocket *ramp_color = bke::node_find_socket(*ramp, SOCK_OUT, "Color"_ustr);
+
+  bNodeSocket *hsv_l_col = bke::node_find_socket(*hsv_light, SOCK_IN, "Color"_ustr);
+  bNodeSocket *hsv_l_sat = bke::node_find_socket(*hsv_light, SOCK_IN, "Saturation"_ustr);
+  bNodeSocket *hsv_l_val = bke::node_find_socket(*hsv_light, SOCK_IN, "Value"_ustr);
+  bNodeSocket *hsv_l_out = bke::node_find_socket(*hsv_light, SOCK_OUT, "Color"_ustr);
+  bNodeSocket *hsv_d_col = bke::node_find_socket(*hsv_dark, SOCK_IN, "Color"_ustr);
+  bNodeSocket *hsv_d_sat = bke::node_find_socket(*hsv_dark, SOCK_IN, "Saturation"_ustr);
+  bNodeSocket *hsv_d_val = bke::node_find_socket(*hsv_dark, SOCK_IN, "Value"_ustr);
+  bNodeSocket *hsv_d_out = bke::node_find_socket(*hsv_dark, SOCK_OUT, "Color"_ustr);
+  bNodeSocket *hsv_a_col = bke::node_find_socket(*hsv_all, SOCK_IN, "Color"_ustr);
+  bNodeSocket *hsv_a_sat = bke::node_find_socket(*hsv_all, SOCK_IN, "Saturation"_ustr);
+  bNodeSocket *hsv_a_val = bke::node_find_socket(*hsv_all, SOCK_IN, "Value"_ustr);
+  bNodeSocket *hsv_a_out = bke::node_find_socket(*hsv_all, SOCK_OUT, "Color"_ustr);
+
+  bNodeSocket *mix_l_a = mix_in(*mix_light, "A_Color");
+  bNodeSocket *mix_l_b = mix_in(*mix_light, "B_Color");
+  bNodeSocket *mix_l_out = mix_out_color(*mix_light);
+  bNodeSocket *mix_d_a = mix_in(*mix_dark, "A_Color");
+  bNodeSocket *mix_d_b = mix_in(*mix_dark, "B_Color");
+  bNodeSocket *mix_d_out = mix_out_color(*mix_dark);
+  bNodeSocket *mix_ld_fac = mix_in(*mix_ld, "Factor_Float");
+  bNodeSocket *mix_ld_a = mix_in(*mix_ld, "A_Color");
+  bNodeSocket *mix_ld_b = mix_in(*mix_ld, "B_Color");
+  bNodeSocket *mix_ld_out = mix_out_color(*mix_ld);
+  bNodeSocket *mix_all_a = mix_in(*mix_all, "A_Color");
+  bNodeSocket *mix_all_b = mix_in(*mix_all, "B_Color");
+  bNodeSocket *mix_all_out = mix_out_color(*mix_all);
+
+  bNodeSocket *gamma_col = bke::node_find_socket(*gamma, SOCK_IN, "Color"_ustr);
+  bNodeSocket *gamma_g = bke::node_find_socket(*gamma, SOCK_IN, "Gamma"_ustr);
+  bNodeSocket *gamma_out = bke::node_find_socket(*gamma, SOCK_OUT, "Color"_ustr);
+
+  const bNodeSocket *required[] = {
+      in_light,     in_light_attach, in_light_sat, in_light_val, in_dark,     in_dark_attach,
+      in_dark_sat,  in_dark_val,     in_all,       in_all_sat,   in_all_val,  in_gamma,
+      out_color,    diff_bsdf,       to_rgb_in,    to_rgb_out,   ramp_fac,    ramp_color,
+      hsv_l_col,    hsv_l_sat,       hsv_l_val,    hsv_l_out,    hsv_d_col,   hsv_d_sat,
+      hsv_d_val,    hsv_d_out,       hsv_a_col,    hsv_a_sat,    hsv_a_val,   hsv_a_out,
+      mix_l_a,      mix_l_b,         mix_l_out,    mix_d_a,      mix_d_b,     mix_d_out,
+      mix_ld_fac,   mix_ld_a,        mix_ld_b,     mix_ld_out,   mix_all_a,   mix_all_b,
+      mix_all_out,  gamma_col,       gamma_g,      gamma_out,
+  };
+  for (const bNodeSocket *socket : required) {
+    if (socket == nullptr) {
+      return nullptr;
+    }
+  }
+
+  bke::node_add_link(*group, *diffuse, *diff_bsdf, *to_rgb, *to_rgb_in);
+  bke::node_add_link(*group, *to_rgb, *to_rgb_out, *ramp, *ramp_fac);
+
+  bke::node_add_link(*group, *group_input, *in_light, *hsv_light, *hsv_l_col);
+  bke::node_add_link(*group, *group_input, *in_light_sat, *hsv_light, *hsv_l_sat);
+  bke::node_add_link(*group, *group_input, *in_light_val, *hsv_light, *hsv_l_val);
+  bke::node_add_link(*group, *hsv_light, *hsv_l_out, *mix_light, *mix_l_a);
+  bke::node_add_link(*group, *group_input, *in_light_attach, *mix_light, *mix_l_b);
+
+  bke::node_add_link(*group, *group_input, *in_dark, *hsv_dark, *hsv_d_col);
+  bke::node_add_link(*group, *group_input, *in_dark_sat, *hsv_dark, *hsv_d_sat);
+  bke::node_add_link(*group, *group_input, *in_dark_val, *hsv_dark, *hsv_d_val);
+  bke::node_add_link(*group, *hsv_dark, *hsv_d_out, *mix_dark, *mix_d_a);
+  bke::node_add_link(*group, *group_input, *in_dark_attach, *mix_dark, *mix_d_b);
+
+  bke::node_add_link(*group, *ramp, *ramp_color, *mix_ld, *mix_ld_fac);
+  bke::node_add_link(*group, *mix_light, *mix_l_out, *mix_ld, *mix_ld_a);
+  bke::node_add_link(*group, *mix_dark, *mix_d_out, *mix_ld, *mix_ld_b);
+
+  bke::node_add_link(*group, *group_input, *in_all, *hsv_all, *hsv_a_col);
+  bke::node_add_link(*group, *group_input, *in_all_sat, *hsv_all, *hsv_a_sat);
+  bke::node_add_link(*group, *group_input, *in_all_val, *hsv_all, *hsv_a_val);
+  bke::node_add_link(*group, *mix_ld, *mix_ld_out, *mix_all, *mix_all_a);
+  bke::node_add_link(*group, *hsv_all, *hsv_a_out, *mix_all, *mix_all_b);
+
+  bke::node_add_link(*group, *mix_all, *mix_all_out, *gamma, *gamma_col);
+  bke::node_add_link(*group, *group_input, *in_gamma, *gamma, *gamma_g);
+  bke::node_add_link(*group, *gamma, *gamma_out, *group_output, *out_color);
+
+  BKE_main_ensure_invariants(*bmain, group->id);
+  return group;
+}
+
+bool material_is_edge_slot(const Material &material)
+{
+  return STRPREFIX(material.id.name + 2, kMMDEdgeMaterialPrefix);
+}
+
+bNode *find_named_node(bNodeTree &ntree, const char *name)
+{
+  return bke::node_find_node_by_name(ntree, name);
+}
+
+bNode *find_group_node(bNodeTree &ntree, const bNodeTree *group)
+{
+  for (bNode &node : ntree.nodes) {
+    if (node.type_legacy == NODE_GROUP && node.id == &group->id) {
+      return &node;
+    }
+  }
+  return nullptr;
+}
+
+bNode *find_output_node(bNodeTree &ntree)
+{
+  for (bNode &node : ntree.nodes) {
+    if (node.type_legacy == SH_NODE_OUTPUT_MATERIAL) {
+      return &node;
+    }
+  }
+  return nullptr;
+}
+
+bNode *find_principled_node(bNodeTree &ntree)
+{
+  for (bNode &node : ntree.nodes) {
+    if (node.type_legacy == SH_NODE_BSDF_PRINCIPLED) {
+      return &node;
+    }
+  }
+  return nullptr;
+}
+
+void unlink_socket_inputs(bNodeTree &ntree, bNodeSocket &socket)
+{
+  Vector<bNodeLink *> doomed;
+  for (bNodeLink &link : ntree.links) {
+    if (link.tosock == &socket) {
+      doomed.append(&link);
+    }
+  }
+  for (bNodeLink *link : doomed) {
+    bke::node_remove_link(&ntree, *link);
+  }
+}
+
+void apply_toon_socket_defaults(bNode &group_node)
+{
+  set_float_socket(bke::node_find_enabled_input_socket(group_node, "光部饱和度"), kToonLightSat);
+  set_float_socket(bke::node_find_enabled_input_socket(group_node, "光部明度"), kToonLightVal);
+  set_float_socket(bke::node_find_enabled_input_socket(group_node, "暗部饱和度"), kToonDarkSat);
+  set_float_socket(bke::node_find_enabled_input_socket(group_node, "暗部明度"), kToonDarkVal);
+  set_float_socket(bke::node_find_enabled_input_socket(group_node, "整体饱和度"), kToonOverallSat);
+  set_float_socket(bke::node_find_enabled_input_socket(group_node, "整体明度"), kToonOverallVal);
+  set_float_socket(bke::node_find_enabled_input_socket(group_node, "整体伽马"), kToonOverallGamma);
+}
+
+bool apply_basic_toon_to_material(Main *bmain, Material &material, bNodeTree *group)
+{
+  if (material_is_edge_slot(material) || material.nodetree == nullptr || group == nullptr) {
+    return false;
+  }
+  bNodeTree &ntree = *material.nodetree;
+  bNode *base = find_named_node(ntree, kPMXBaseTextureNodeName);
+  bNode *output = find_output_node(ntree);
+  if (base == nullptr || output == nullptr) {
+    return false;
+  }
+  bNodeSocket *base_color = bke::node_find_socket(*base, SOCK_OUT, "Color"_ustr);
+  bNodeSocket *surface = bke::node_find_socket(*output, SOCK_IN, "Surface"_ustr);
+  if (base_color == nullptr || surface == nullptr) {
+    return false;
+  }
+
+  bNode *group_node = find_group_node(ntree, group);
+  if (group_node == nullptr) {
+    group_node = bke::node_add_node(nullptr, ntree, "ShaderNodeGroup"_ustr);
+    if (group_node == nullptr) {
+      return false;
+    }
+    STRNCPY_UTF8(group_node->name, kBasicToonGroupNodeName);
+    STRNCPY_UTF8(group_node->label, kBasicToonGroupNodeName);
+    group_node->location[0] = output->location[0] - 280.0f;
+    group_node->location[1] = output->location[1] + 40.0f;
+    group_node->id = &group->id;
+    id_us_plus(&group->id);
+    BKE_ntree_update_tag_node_property(&ntree, group_node);
+    BKE_main_ensure_invariants(*bmain, ntree.id);
+  }
+
+  const char *color_inputs[] = {
+      "光部颜色", "光部附着色", "暗部颜色", "暗部附着色", "整体颜色",
+  };
+  for (const char *name : color_inputs) {
+    if (bNodeSocket *sock = bke::node_find_enabled_input_socket(*group_node, name)) {
+      unlink_socket_inputs(ntree, *sock);
+      bke::node_add_link(ntree, *base, *base_color, *group_node, *sock);
+    }
+  }
+  apply_toon_socket_defaults(*group_node);
+
+  bNodeSocket *group_color = bke::node_find_enabled_output_socket(*group_node, "颜色");
+  if (group_color == nullptr) {
+    return false;
+  }
+
+  bNode *principled = find_principled_node(ntree);
+  bNodeSocket *alpha_from = nullptr;
+  bNode *alpha_owner = nullptr;
+  if (principled != nullptr) {
+    if (bNodeSocket *alpha = bke::node_find_enabled_input_socket(*principled, "Alpha")) {
+      for (bNodeLink &link : ntree.links) {
+        if (link.tosock == alpha && link.fromnode != nullptr && link.fromsock != nullptr) {
+          alpha_owner = link.fromnode;
+          alpha_from = link.fromsock;
+          break;
+        }
+      }
+    }
+  }
+
+  unlink_socket_inputs(ntree, *surface);
+
+  const bool use_blend_alpha = material.blend_method == MA_BM_BLEND && alpha_from != nullptr &&
+                               alpha_owner != nullptr;
+  if (use_blend_alpha) {
+    bNode *mix = find_named_node(ntree, kBasicToonAlphaMixName);
+    if (mix == nullptr) {
+      mix = add_shader_node(ntree, SH_NODE_MIX_SHADER, output->location[0] - 180.0f, output->location[1]);
+      STRNCPY_UTF8(mix->name, kBasicToonAlphaMixName);
+      STRNCPY_UTF8(mix->label, kBasicToonAlphaMixName);
+    }
+    bNode *trans = find_named_node(ntree, kBasicToonTransparentName);
+    if (trans == nullptr) {
+      trans = add_shader_node(
+          ntree, SH_NODE_BSDF_TRANSPARENT, mix->location[0] - 200.0f, mix->location[1] - 80.0f);
+      STRNCPY_UTF8(trans->name, kBasicToonTransparentName);
+      STRNCPY_UTF8(trans->label, kBasicToonTransparentName);
+    }
+    bNodeSocket *mix_fac = bke::node_find_socket(*mix, SOCK_IN, "Fac"_ustr);
+    bNodeSocket *mix_shader_1 = bke::node_find_socket(*mix, SOCK_IN, "Shader"_ustr);
+    bNodeSocket *mix_shader_2 = bke::node_find_socket(*mix, SOCK_IN, "Shader_001"_ustr);
+    bNodeSocket *mix_out = bke::node_find_socket(*mix, SOCK_OUT, "Shader"_ustr);
+    bNodeSocket *trans_out = bke::node_find_socket(*trans, SOCK_OUT, "BSDF"_ustr);
+    if (mix_fac == nullptr || mix_shader_1 == nullptr || mix_shader_2 == nullptr ||
+        mix_out == nullptr || trans_out == nullptr)
+    {
+      return false;
+    }
+    unlink_socket_inputs(ntree, *mix_fac);
+    unlink_socket_inputs(ntree, *mix_shader_1);
+    unlink_socket_inputs(ntree, *mix_shader_2);
+    bke::node_add_link(ntree, *alpha_owner, *alpha_from, *mix, *mix_fac);
+    bke::node_add_link(ntree, *trans, *trans_out, *mix, *mix_shader_1);
+    bke::node_add_link(ntree, *group_node, *group_color, *mix, *mix_shader_2);
+    bke::node_add_link(ntree, *mix, *mix_out, *output, *surface);
+  }
+  else {
+    bke::node_add_link(ntree, *group_node, *group_color, *output, *surface);
+  }
+
+  /* Keep Principled (and sphere mix) disconnected so Clean can restore Surface. */
+  BKE_main_ensure_invariants(*bmain, ntree.id);
+  DEG_id_tag_update(&material.id, ID_RECALC_SHADING);
+  return true;
+}
+
+bool restore_principled_surface(Main *bmain, Material &material)
+{
+  if (material.nodetree == nullptr) {
+    return false;
+  }
+  bNodeTree &ntree = *material.nodetree;
+  bNode *output = find_output_node(ntree);
+  bNode *principled = find_principled_node(ntree);
+  if (output == nullptr || principled == nullptr) {
+    return false;
+  }
+  bNodeSocket *bsdf = bke::node_find_socket(*principled, SOCK_OUT, "BSDF"_ustr);
+  bNodeSocket *surface = bke::node_find_socket(*output, SOCK_IN, "Surface"_ustr);
+  if (bsdf == nullptr || surface == nullptr) {
+    return false;
+  }
+  unlink_socket_inputs(ntree, *surface);
+  bke::node_add_link(ntree, *principled, *bsdf, *output, *surface);
+  BKE_main_ensure_invariants(*bmain, ntree.id);
+  DEG_id_tag_update(&material.id, ID_RECALC_SHADING);
+  return true;
+}
+
+void clean_basic_toon_from_material(Main *bmain, Material &material, bNodeTree *group)
+{
+  if (material_is_edge_slot(material) || material.nodetree == nullptr) {
+    return;
+  }
+  bNodeTree &ntree = *material.nodetree;
+  bNode *group_node = group != nullptr ? find_group_node(ntree, group) :
+                                         find_named_node(ntree, kBasicToonGroupNodeName);
+  bNode *mix = find_named_node(ntree, kBasicToonAlphaMixName);
+  bNode *trans = find_named_node(ntree, kBasicToonTransparentName);
+  const bool restored = restore_principled_surface(bmain, material);
+  if (mix != nullptr) {
+    bke::node_remove_node(bmain, ntree, *mix, true);
+  }
+  if (trans != nullptr) {
+    bke::node_remove_node(bmain, ntree, *trans, true);
+  }
+  if (group_node != nullptr) {
+    bke::node_remove_node(bmain, ntree, *group_node, true);
+  }
+  if (!restored) {
+    BKE_main_ensure_invariants(*bmain, ntree.id);
+    DEG_id_tag_update(&material.id, ID_RECALC_SHADING);
+  }
+}
+
+bool mesh_has_pmx_base_texture(Object *object)
+{
+  if (object == nullptr || object->type != OB_MESH) {
+    return false;
+  }
+  for (const int slot : IndexRange(object->totcol)) {
+    Material *material = BKE_object_material_get(object, short(slot + 1));
+    if (material == nullptr || material_is_edge_slot(*material) || material->nodetree == nullptr) {
+      continue;
+    }
+    if (find_named_node(*material->nodetree, kPMXBaseTextureNodeName) != nullptr) {
+      return true;
+    }
+  }
+  return false;
+}
+
+Vector<Object *> collect_model_toon_meshes(Main *bmain, Object *active)
+{
+  Vector<Object *> meshes;
+  Object *root = model_root_of(active);
+  if (bmain == nullptr || root == nullptr) {
+    return meshes;
+  }
+  for (Object &object : bmain->objects) {
+    if (object.type != OB_MESH) {
+      continue;
+    }
+    if (model_root_of(&object) != root) {
+      continue;
+    }
+    if (!mesh_has_pmx_base_texture(&object)) {
+      continue;
+    }
+    meshes.append(&object);
+  }
+  return meshes;
+}
+
+Vector<Material *> collect_model_toon_materials(const Span<Object *> meshes)
+{
+  Vector<Material *> materials;
+  for (Object *object : meshes) {
+    for (const int slot : IndexRange(object->totcol)) {
+      Material *material = BKE_object_material_get(object, short(slot + 1));
+      if (material == nullptr || material_is_edge_slot(*material)) {
+        continue;
+      }
+      if (materials.contains(material)) {
+        continue;
+      }
+      materials.append(material);
+    }
+  }
+  return materials;
+}
+
+void apply_agx_high_contrast(Scene *scene)
+{
+  if (scene == nullptr) {
+    return;
+  }
+  STRNCPY_UTF8(scene->view_settings.view_transform, kAgXViewTransform);
+  STRNCPY_UTF8(scene->view_settings.look, kAgXHighContrastLook);
+  DEG_id_tag_update(&scene->id, ID_RECALC_SHADING);
 }
 
 /* ----------------------------------------------------------------- */
@@ -772,6 +1384,17 @@ const EnumPropertyItem mmd_edge_preview_action_items[] = {
     {0, nullptr, 0, nullptr, nullptr},
 };
 
+enum class BasicToonAction : int {
+  Create = 0,
+  Clean = 1,
+};
+
+const EnumPropertyItem mmd_basic_toon_action_items[] = {
+    {int(BasicToonAction::Create), "CREATE", 0, "Create", "Apply the basic toon shader"},
+    {int(BasicToonAction::Clean), "CLEAN", 0, "Clean", "Remove the basic toon shader"},
+    {0, nullptr, 0, nullptr, nullptr},
+};
+
 bool poll_mmd_model(bContext *C)
 {
   Object *object = CTX_data_active_object(C);
@@ -837,6 +1460,67 @@ wmOperatorStatus mmd_edge_preview_setup_exec(bContext *C, wmOperator *op)
   return OPERATOR_FINISHED;
 }
 
+wmOperatorStatus mmd_basic_toon_setup_exec(bContext *C, wmOperator *op)
+{
+  Main *bmain = CTX_data_main(C);
+  Object *active = CTX_data_active_object(C);
+  Scene *scene = CTX_data_scene(C);
+  if (bmain == nullptr || active == nullptr) {
+    BKE_report(op->reports, RPT_ERROR, "MMD Render: select a PMX model first");
+    return OPERATOR_CANCELLED;
+  }
+
+  const Vector<Object *> meshes = collect_model_toon_meshes(bmain, active);
+  if (meshes.is_empty()) {
+    BKE_report(op->reports, RPT_ERROR, "MMD Render: no PMX mesh found for the active model");
+    return OPERATOR_CANCELLED;
+  }
+
+  const Vector<Material *> materials = collect_model_toon_materials(meshes);
+  const BasicToonAction action = BasicToonAction(RNA_enum_get(op->ptr, "action"));
+  if (action == BasicToonAction::Clean) {
+    bNodeTree *group = nullptr;
+    if (ID *existing = BKE_libblock_find_name(bmain, ID_NT, kBasicToonNodeGroup)) {
+      group = reinterpret_cast<bNodeTree *>(existing);
+    }
+    for (Material *material : materials) {
+      clean_basic_toon_from_material(bmain, *material, group);
+    }
+    WM_event_add_notifier(C, NC_MATERIAL | ND_SHADING, nullptr);
+    BKE_reportf(op->reports,
+                RPT_INFO,
+                "MMD Render: removed basic toon from %d material(s)",
+                int(materials.size()));
+    return OPERATOR_FINISHED;
+  }
+
+  bNodeTree *group = ensure_basic_toon_node_group(bmain);
+  if (group == nullptr) {
+    BKE_report(op->reports, RPT_ERROR, "MMD Render: failed to build the basic toon node group");
+    return OPERATOR_CANCELLED;
+  }
+
+  int applied = 0;
+  for (Material *material : materials) {
+    if (apply_basic_toon_to_material(bmain, *material, group)) {
+      applied++;
+    }
+  }
+  apply_agx_high_contrast(scene);
+  WM_event_add_notifier(C, NC_MATERIAL | ND_SHADING, nullptr);
+  WM_event_add_notifier(C, NC_SCENE | ND_RENDER_OPTIONS, nullptr);
+
+  if (applied == 0) {
+    BKE_report(op->reports, RPT_WARNING, "MMD Render: no PMX material accepted the basic toon");
+    return OPERATOR_CANCELLED;
+  }
+  BKE_reportf(op->reports,
+              RPT_INFO,
+              "MMD Render: applied basic toon to %d material(s)",
+              applied);
+  return OPERATOR_FINISHED;
+}
+
 /* ----------------------------------------------------------------- */
 /* N-panel (sidebar) UI.                                             */
 /* ----------------------------------------------------------------- */
@@ -864,14 +1548,15 @@ void mmd_render_panel_draw(const bContext *C, Panel *panel)
                       ICON_WORLD);
   layout.separator();
 
-  const Vector<Object *> meshes = collect_model_meshes(bmain, active);
-  if (meshes.is_empty()) {
+  const Vector<Object *> edge_meshes = collect_model_meshes(bmain, active);
+  const Vector<Object *> toon_meshes = collect_model_toon_meshes(bmain, active);
+  if (edge_meshes.is_empty() && toon_meshes.is_empty()) {
     layout.label(text.no_model, ICON_INFO);
     return;
   }
 
   int edge_capable = 0;
-  for (Object *object : meshes) {
+  for (Object *object : edge_meshes) {
     Mesh *mesh = reinterpret_cast<Mesh *>(object->data);
     if (mesh == nullptr) {
       continue;
@@ -892,7 +1577,7 @@ void mmd_render_panel_draw(const bContext *C, Panel *panel)
 
   if (ui::Layout *edge = layout.panel(C, "mmd_render_toon_edge", false, text.toon_edge)) {
     char status[64];
-    SNPRINTF(status, text.status_format, edge_capable, int(meshes.size()));
+    SNPRINTF(status, text.status_format, edge_capable, int(edge_meshes.size()));
     edge->label(status, ICON_MOD_SOLIDIFY);
 
     ui::Layout &column = edge->column(true);
@@ -901,6 +1586,28 @@ void mmd_render_panel_draw(const bContext *C, Panel *panel)
     RNA_enum_set(&create_props, "action", int(EdgePreviewAction::Create));
     PointerRNA clean_props = column.op("WM_OT_mmd_edge_preview_setup", text.clean_edge, ICON_X);
     RNA_enum_set(&clean_props, "action", int(EdgePreviewAction::Clean));
+  }
+
+  const Vector<Material *> toon_materials = collect_model_toon_materials(toon_meshes);
+  int toon_capable = 0;
+  for (Material *material : toon_materials) {
+    if (material->nodetree != nullptr &&
+        find_named_node(*material->nodetree, kPMXBaseTextureNodeName) != nullptr)
+    {
+      toon_capable++;
+    }
+  }
+  if (ui::Layout *toon = layout.panel(C, "mmd_render_basic_toon", false, text.basic_toon)) {
+    char status[64];
+    SNPRINTF(status, text.toon_status_format, toon_capable, int(toon_materials.size()));
+    toon->label(status, ICON_NODETREE);
+
+    ui::Layout &column = toon->column(true);
+    PointerRNA create_props = column.op(
+        "WM_OT_mmd_basic_toon_setup", text.create_toon, ICON_NODETREE);
+    RNA_enum_set(&create_props, "action", int(BasicToonAction::Create));
+    PointerRNA clean_props = column.op("WM_OT_mmd_basic_toon_setup", text.clean_toon, ICON_X);
+    RNA_enum_set(&clean_props, "action", int(BasicToonAction::Clean));
   }
 }
 
@@ -948,6 +1655,24 @@ void WM_OT_mmd_edge_preview_setup(wmOperatorType *ot)
                 "Solidify thickness for the edge shell; 0 derives it from the model root scale",
                 0.0f,
                 1.0f);
+}
+
+void WM_OT_mmd_basic_toon_setup(wmOperatorType *ot)
+{
+  ot->name = "MMD Basic Toon";
+  ot->description =
+      "Apply or remove the basic toon shader on the active PMX model; does not change toon edges";
+  ot->idname = "WM_OT_mmd_basic_toon_setup";
+  ot->exec = mmd_basic_toon_setup_exec;
+  ot->poll = poll_mmd_model;
+  ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
+
+  ot->prop = RNA_def_enum(ot->srna,
+                          "action",
+                          mmd_basic_toon_action_items,
+                          int(BasicToonAction::Create),
+                          "Action",
+                          "Apply or remove the basic toon shader");
 }
 
 void ED_mmd_render_panel_register(ARegionType *art)
