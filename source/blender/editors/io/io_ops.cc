@@ -120,6 +120,7 @@ void ED_operatortypes_io()
   /* MMD render operators (own "MMD Render" sidebar tab). */
   WM_operatortype_append(WM_OT_mmd_render_set_panel_language);
   WM_operatortype_append(WM_OT_mmd_edge_preview_setup);
+  WM_operatortype_append(WM_OT_mmd_basic_toon_setup);
 #endif
 
 #ifdef WITH_IO_FBX
