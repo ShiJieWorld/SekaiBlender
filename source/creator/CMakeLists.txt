@@ -1907,6 +1907,36 @@ install(
   DESTINATION ${TARGETDIR_VER}
 )
 
+# User-facing AI control contract. One copy in the source tree; INSTALL ships it
+# next to the executable so opening the install folder is enough.
+# TARGETDIR_EXE is Windows/portable; fall back to text/ver dirs on other layouts.
+if(NOT DEFINED TARGETDIR_EXE)
+  if(DEFINED TARGETDIR_TEXT)
+    set(TARGETDIR_EXE "${TARGETDIR_TEXT}")
+  else()
+    set(TARGETDIR_EXE ".")
+  endif()
+endif()
+if(EXISTS "${CMAKE_SOURCE_DIR}/AGENTS.md")
+  install(
+    FILES ${CMAKE_SOURCE_DIR}/AGENTS.md
+    DESTINATION ${TARGETDIR_EXE}
+  )
+endif()
+if(EXISTS "${CMAKE_SOURCE_DIR}/docs/agent-control.md")
+  install(
+    FILES ${CMAKE_SOURCE_DIR}/docs/agent-control.md
+    DESTINATION ${TARGETDIR_EXE}/docs
+  )
+endif()
+if(EXISTS "${CMAKE_SOURCE_DIR}/docs/agent-control")
+  install(
+    DIRECTORY ${CMAKE_SOURCE_DIR}/docs/agent-control
+    DESTINATION ${TARGETDIR_EXE}/docs
+    PATTERN "__pycache__" EXCLUDE
+  )
+endif()
+
 # Install more files specified elsewhere.
 delayed_do_install(${TARGETDIR_VER})
 
