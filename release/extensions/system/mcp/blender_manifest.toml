@@ -1,0 +1,19 @@
+schema_version = "1.0.0"
+
+id = "mcp"
+version = "1.0.0"
+name = "Local AI Bridge"
+tagline = "Local TCP socket so AI agents can drive the open scene"
+maintainer = "Blender Lab"
+type = "add-on"
+website = "https://www.blender.org/lab/mcp-server/"
+blender_version_min = "5.1.0"
+
+license = [
+  "SPDX:GPL-3.0-or-later",
+]
+
+tags = ["Development"]
+
+[permissions]
+network = "Listens on localhost so AI agents can send Python to this SekaiBlender window"
