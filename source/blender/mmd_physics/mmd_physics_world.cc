@@ -1259,8 +1259,8 @@ bool MMDPhysicsWorld::find_body_containing_point(
     {
       return;
     }
-    /* Inside AABB: compute penetration depth as the distance to the
-     * nearest face. Positive = inside. */
+    /* Inside AABB: compute nearest-face containment depth. Positive = inside;
+     * this is not an exact Bullet shape penetration depth. */
     const float dx_min = float(point.x() - aabb_min.x());
     const float dx_max = float(aabb_max.x() - point.x());
     const float dy_min = float(point.y() - aabb_min.y());
@@ -2417,7 +2417,7 @@ int MMDPhysicsWorld::mute_physics_bone_constraints()
    * can return the armature to its pre-simulation shape on Stop. */
   bPose *pose = armature_->pose;
   int muted_count = 0;
-  for (bPoseChannel *pchan = static_cast<bPoseChannel *>(pose->chanbase.first);
+  for (bPoseChannel *pchan = static_cast<bPoseChannel *>(pose->chanbase.first());
        pchan != nullptr;
        pchan = pchan->next)
   {
@@ -2436,7 +2436,7 @@ int MMDPhysicsWorld::mute_physics_bone_constraints()
     ip.rotmode = int(pchan->rotmode);
     initial_pose_.append(ip);
 
-    for (bConstraint *con = static_cast<bConstraint *>(pchan->constraints.first);
+    for (bConstraint *con = static_cast<bConstraint *>(pchan->constraints.first());
          con != nullptr;
          con = con->next)
     {

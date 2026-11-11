@@ -2,6 +2,10 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup gpu
+ */
+
 #include "DNA_userdef_types.h"
 
 #include "GPU_debug.hh"
@@ -20,6 +24,8 @@
 using namespace blender::gpu;
 
 namespace blender::gpu {
+
+static CLG_LogRef LOG = {"gpu.metal"};
 
 /* Counter for active command buffers. */
 volatile std::atomic<int> MTLCommandBufferManager::num_active_cmd_bufs_in_system = 0;
@@ -73,6 +79,7 @@ id<MTLCommandBuffer> MTLCommandBufferManager::ensure_begin()
 
     [active_command_buffer_ retain];
     context_.main_command_buffer.inc_active_command_buffer_count();
+    active_safe_free_list_ = MTLContext::get_global_memory_manager()->acquire_current_safe_list();
 
     /* Ensure we begin new Scratch Buffer if we are on a new frame. */
     MTLScratchBufferManager &mem = context_.memory_manager;
@@ -114,14 +121,14 @@ bool MTLCommandBufferManager::submit(bool wait)
 
   /*** Submit Command Buffer. ***/
   /* Command buffer lifetime tracking. */
-  /* Increment current MTLSafeFreeList reference counter to flag MTLBuffers freed within
-   * the current command buffer lifetime as used.
+  /* The MTLSafeFreeList referenced since the command buffer was created flags MTLBuffers freed
+   * within the command buffer lifetime as used. Lists are released in order, so this also covers
+   * buffers freed into later lists.
    * This ensures that in-use resources are not prematurely de-referenced and returned to the
    * available buffer pool while they are in-use by the GPU. */
-  MTLSafeFreeList *cmd_free_buffer_list =
-      MTLContext::get_global_memory_manager()->get_current_safe_list();
+  MTLSafeFreeList *cmd_free_buffer_list = active_safe_free_list_;
   BLI_assert(cmd_free_buffer_list);
-  cmd_free_buffer_list->increment_reference();
+  active_safe_free_list_ = nullptr;
 
   id<MTLCommandBuffer> cmd_buffer_ref = active_command_buffer_;
   [cmd_buffer_ref retain];
@@ -165,7 +172,7 @@ bool MTLCommandBufferManager::submit(bool wait)
 
       NSError *error = [active_command_buffer_ error];
       if (error != nil) {
-        NSLog(@"%@", error);
+        CLOG_ERROR(&LOG, "Command buffer error: %s", [[error localizedDescription] UTF8String]);
         BLI_assert(false);
       }
     }
@@ -971,9 +978,7 @@ void MTLVertexCommandEncoder::set_sampler(id<MTLSamplerState> sampler_state, int
 void MTLVertexCommandEncoder::set_acceleration_structure(id<MTLAccelerationStructure> accel,
                                                          int index)
 {
-  if (@available(macOS 12.0, *)) {
-    [enc setVertexAccelerationStructure:accel atBufferIndex:index];
-  }
+  [enc setVertexAccelerationStructure:accel atBufferIndex:index];
 }
 void MTLVertexCommandEncoder::use_resource(id<MTLResource> resource, MTLResourceUsage usage)
 {
@@ -1003,9 +1008,7 @@ void MTLFragmentCommandEncoder::set_sampler(id<MTLSamplerState> sampler_state, i
 void MTLFragmentCommandEncoder::set_acceleration_structure(id<MTLAccelerationStructure> accel,
                                                            int index)
 {
-  if (@available(macOS 12.0, *)) {
-    [enc setFragmentAccelerationStructure:accel atBufferIndex:index];
-  }
+  [enc setFragmentAccelerationStructure:accel atBufferIndex:index];
 }
 void MTLFragmentCommandEncoder::use_resource(id<MTLResource> resource, MTLResourceUsage usage)
 {

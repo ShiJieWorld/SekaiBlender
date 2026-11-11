@@ -2,10 +2,16 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup geo
+ */
+
 #include "BLI_color.hh"
 #include "BLI_math_base.hh"
 #include "BLI_math_rotation.hh"
 #include "BLI_string_utils.hh"
+#include "BLI_task.hh"
+#include "BLI_vector_set.hh"
 
 #include "BKE_attribute_math.hh"
 #include "BKE_volume.hh"
@@ -260,46 +266,52 @@ MappedPointDataGrid points_to_point_data_grid(const Span<float3> positions,
       openvdb::tools::createPointIndexGrid<openvdb::tools::PointIndexGrid>(
           positions_wrapper, vdb_transform_cell_centered);
 
-  /* Convert the main positions array.
-   * Note: Use the corner-centered transform here so that position data in the points array is in
-   * the regular 0..1 sampling space. */
-  openvdb::points::PointDataGrid::Ptr point_data_grid =
-      openvdb::points::createPointDataGrid<openvdb::points::NullCodec,
-                                           openvdb::points::PointDataGrid>(
-          *point_index_grid, positions_wrapper, vdb_transform);
-
+  openvdb::points::PointDataGrid::Ptr point_data_grid;
   VectorSet<std::string> used_names;
   Vector<std::pair<std::string, std::string>> attribute_map;
-  for (const PointDataGridAttributeInfo &info : attributes) {
-    const CPPType &cpp_type = info.data.type();
-    bke::attribute_math::to_static_type(cpp_type, [&]<typename ValueT>() {
-      using type_traits = typename bke::VolumeGridTraits<ValueT>;
+  /* OpenVDB holds a global attribute registry lock while running parallel tasks in
+   * #createPointDataGrid and #appendAttribute. Isolate to prevent a waiting thread from executing
+   * another point conversion that tries to acquire the same non-recursive lock. */
+  threading::isolate_task([&]() {
+    /* Convert the main positions array.
+     * Note: Use the corner-centered transform here so that position data in the points array is in
+     * the regular 0..1 sampling space. */
+    point_data_grid = openvdb::points::createPointDataGrid<openvdb::points::NullCodec,
+                                                           openvdb::points::PointDataGrid>(
+        *point_index_grid, positions_wrapper, vdb_transform);
 
-      if constexpr (!std::is_same_v<typename type_traits::PrimitiveType, void>) {
-        /* Note: some attributes could benefit from specialized codecs. The OpenVDB cookbook
-         * suggests to store e.g. radius attribute with a fixed-point codec. This is not supported
-         * here yet.
-         */
-        // openvdb::points::FixedPointCodec</*1-byte=*/false, openvdb::points::UnitRange>;
-        using Codec = openvdb::points::NullCodec;
-        using AttributeArray =
-            openvdb::points::TypedAttributeArray<typename type_traits::PrimitiveType, Codec>;
-        if (!AttributeArray::isRegistered()) {
-          AttributeArray::registerType();
+    for (const PointDataGridAttributeInfo &info : attributes) {
+      const CPPType &cpp_type = info.data.type();
+      bke::attribute_math::to_static_type(cpp_type, [&]<typename ValueT>() {
+        using type_traits = typename bke::VolumeGridTraits<ValueT>;
+
+        if constexpr (!std::is_same_v<typename type_traits::PrimitiveType, void>) {
+          /* Note: some attributes could benefit from specialized codecs. The OpenVDB cookbook
+           * suggests to store e.g. radius attribute with a fixed-point codec. This is not
+           * supported here yet.
+           */
+          // openvdb::points::FixedPointCodec</*1-byte=*/false, openvdb::points::UnitRange>;
+          using Codec = openvdb::points::NullCodec;
+          using AttributeArray =
+              openvdb::points::TypedAttributeArray<typename type_traits::PrimitiveType, Codec>;
+          if (!AttributeArray::isRegistered()) {
+            AttributeArray::registerType();
+          }
+
+          const std::string vdb_name = add_unique_vdb_attribute_name(info.name, used_names);
+          attribute_map.append_as(info.name, vdb_name);
+
+          openvdb::NamePair point_data_attribute = AttributeArray::attributeType();
+          openvdb::points::appendAttribute(
+              point_data_grid->tree(), vdb_name, point_data_attribute);
+
+          const PointAttributeSpan data_wrapper(info.data.typed<ValueT>());
+          openvdb::points::populateAttribute(
+              point_data_grid->tree(), point_index_grid->tree(), vdb_name, data_wrapper);
         }
-
-        const std::string vdb_name = add_unique_vdb_attribute_name(info.name, used_names);
-        attribute_map.append_as(info.name, vdb_name);
-
-        openvdb::NamePair point_data_attribute = AttributeArray::attributeType();
-        openvdb::points::appendAttribute(point_data_grid->tree(), vdb_name, point_data_attribute);
-
-        const PointAttributeSpan data_wrapper(info.data.typed<ValueT>());
-        openvdb::points::populateAttribute(
-            point_data_grid->tree(), point_index_grid->tree(), vdb_name, data_wrapper);
-      }
-    });
-  }
+      });
+    }
+  });
 
   return {bke::GVolumeGrid(std::move(point_data_grid)), std::move(attribute_map)};
 }
@@ -345,7 +357,7 @@ namespace kernel_functions {
  * This is equivalent to the offset applied to sampling positions,
  * see geometry::grid_sampling::sample_tree.
  */
-inline int kernel_size(const KernelType kernel_type)
+inline int kernel_range(const KernelType kernel_type)
 {
   using namespace geometry::grid_sampling;
 
@@ -437,7 +449,7 @@ struct KernelTransferBase : public openvdb::points::TransformTransfer,
   static const int32_t DIM = TreeType::LeafNodeType::DIM;
 
   KernelType kernel_type_;
-  int kernel_size_;
+  int kernel_range_;
 
   /* Point attribute name for input values. */
   StringRef value_attribute_;
@@ -453,7 +465,7 @@ struct KernelTransferBase : public openvdb::points::TransformTransfer,
       : TransformTransfer(source.transform(), dest.transform()),
         openvdb::points::VolumeTransfer<TreeType>(dest.tree()),
         kernel_type_(kernel_type),
-        kernel_size_(kernel_functions::kernel_size(kernel_type)),
+        kernel_range_(kernel_functions::kernel_range(kernel_type)),
         value_attribute_(value_attribute)
   {
   }
@@ -462,7 +474,7 @@ struct KernelTransferBase : public openvdb::points::TransformTransfer,
       : TransformTransfer(other),
         openvdb::points::VolumeTransfer<TreeType>(other),
         kernel_type_(other.kernel_type_),
-        kernel_size_(other.kernel_size_),
+        kernel_range_(other.kernel_range_),
         value_attribute_(other.value_attribute_)
   {
   }
@@ -475,7 +487,7 @@ struct KernelTransferBase : public openvdb::points::TransformTransfer,
   /* Search range for point voxels around the target voxel. */
   openvdb::Int32 range(const openvdb::Coord & /*leaf_origin*/, size_t /*leaf_idx*/) const
   {
-    return (kernel_size_ + 1) >> 1;
+    return kernel_range_;
   }
 
   AttributeType get_value(const openvdb::Index point_index)
@@ -498,9 +510,9 @@ struct KernelTransferBase : public openvdb::points::TransformTransfer,
    * For each point, compute its relative index space position in the destination tree and
    * sum a function of per-point values.
    *
-   * \param ijk Point voxel coordinate.
-   * \param point_index_range Range of points inside the point voxel bounds.
-   * \param target_bounds Coordinate region of the destination tree to add into.
+   * \param ijk: Point voxel coordinate.
+   * \param point_index_range: Range of points inside the point voxel bounds.
+   * \param target_bounds: Coordinate region of the destination tree to add into.
    */
   template<typename ValueFn>
   void add_points_to_voxels(const openvdb::Coord &ijk,
@@ -508,8 +520,8 @@ struct KernelTransferBase : public openvdb::points::TransformTransfer,
                             const openvdb::CoordBBox &target_bounds,
                             ValueFn value_fn)
   {
-    const int max_offset = ((kernel_size_ + 1) >> 1);
-    openvdb::CoordBBox intersect_box(ijk.offsetBy(-max_offset + 1), ijk.offsetBy(max_offset));
+    /* Left side includes the target voxel index, subtract 1. */
+    openvdb::CoordBBox intersect_box(ijk.offsetBy(-kernel_range_), ijk.offsetBy(kernel_range_));
     intersect_box.intersect(target_bounds);
     if (intersect_box.empty()) {
       return;
@@ -607,7 +619,7 @@ static typename GridType::Ptr prepare_destination_grid(
     SCOPED_TIMER("      dilateActiveValues");
 #  endif
     /* Dilate to ensure all voxels within range of a particle are active. */
-    const int max_offset = (kernel_functions::kernel_size(kernel_type) + 1) >> 1;
+    const int max_offset = kernel_functions::kernel_range(kernel_type);
     openvdb::tools::dilateActiveValues(dst_grid->tree(),
                                        max_offset,
                                        openvdb::tools::NN_FACE_EDGE_VERTEX,

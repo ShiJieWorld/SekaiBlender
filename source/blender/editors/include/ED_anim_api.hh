@@ -83,12 +83,10 @@ struct MPathTarget {
   bPoseChannel *pchan = nullptr; /* Source pose-channel (if applicable). */
 };
 
-/* ************************************************ */
-/* ANIMATION CHANNEL FILTERING */
-/* `anim_filter.cc` */
-
 /* -------------------------------------------------------------------- */
 /** \name Context
+ *
+ * Animation channel filtering, implemented in `anim_filter.cc`.
  * \{ */
 
 /** Main Data container types. */
@@ -115,6 +113,8 @@ enum eAnimCont_Types {
   ANIMCONT_MASK = 9,
   /** "timeline" editor (#bDopeSheet). */
   ANIMCONT_TIMELINE = 10,
+  /** Cache file (#bDopeSheet). */
+  ANIMCONT_CACHEFILE = 11,
 };
 
 /**
@@ -646,14 +646,12 @@ bAction *ANIM_active_action_from_area(const Main &bmain,
                                       const ScrArea *area,
                                       ID **r_action_user = nullptr);
 
-/* ************************************************ */
-/* ANIMATION CHANNELS LIST */
-/* anim_channels_*.cc */
-
 /** \} */
 
 /* -------------------------------------------------------------------- */
 /** \name Drawing TypeInfo
+ *
+ * Animation channels list, implemented in `anim_channels_*.cc`.
  * \{ */
 
 /** Role or level of anim-channel in the hierarchy. */
@@ -875,16 +873,14 @@ bool ANIM_is_active_channel(bAnimListElem *ale);
  */
 void ANIM_deselect_keys_in_animation_editors(bContext *C);
 
-/* ************************************************ */
-/* DRAWING API */
-/* `anim_draw.cc` */
-
 /** \} */
 
 /* -------------------------------------------------------------------- */
 /** \name Current Frame Drawing
  *
  * Main call to draw current-frame indicator in an Animation Editor.
+ *
+ * Implemented in `anim_draw.cc`.
  * \{ */
 
 /* flags for Current Frame Drawing */
@@ -940,13 +936,12 @@ void ANIM_draw_framerange(Scene *scene, View2D *v2d);
 void ANIM_draw_action_framerange(
     AnimData *adt, bAction *action, View2D *v2d, float ymin, float ymax);
 
-/* ************************************************* */
-/* F-MODIFIER TOOLS */
-
 /** \} */
 
 /* -------------------------------------------------------------------- */
 /** \name UI Panel Drawing
+ *
+ * F-Modifier tools.
  * \{ */
 
 bool ANIM_nla_context_track_ptr(const bContext *C, PointerRNA *r_ptr);
@@ -1000,13 +995,12 @@ bool ANIM_fmodifiers_copy_to_buf(ListBaseT<FModifier> *modifiers, bool active);
  */
 bool ANIM_fmodifiers_paste_from_buf(ListBaseT<FModifier> *modifiers, bool replace, FCurve *curve);
 
-/* ************************************************* */
-/* ASSORTED TOOLS */
-
 /** \} */
 
 /* -------------------------------------------------------------------- */
 /** \name Animation F-Curves <-> Icons/Names Mapping
+ *
+ * Assorted tools.
  * \{ */
 
 /* `anim_ipo_utils.cc` */
@@ -1191,10 +1185,10 @@ float ANIM_unit_mapping_get_factor(Scene *scene, ID *id, FCurve *fcu, short flag
 
 /** \} */
 
-/* `anim_deps.cc` */
-
 /* -------------------------------------------------------------------- */
 /** \name Animation Updates
+ *
+ * Implemented in `anim_deps.cc`.
  * \{ */
 
 /**
@@ -1276,15 +1270,19 @@ void ED_drivers_editor_init(bContext *C, ScrArea *area);
  */
 void ED_anim_ale_fcurve_delete(bAnimContext &ac, bAnimListElem &ale);
 
-/* ************************************************ */
+/** \} */
 
-enum eAnimvizCalcRange : uint8_t {
-  /** Try to limit updates to a close neighborhood of the current frame. */
-  ANIMVIZ_CALC_RANGE_CHANGED,
+/* -------------------------------------------------------------------- */
+/** \name Motion Paths
+ * \{ */
 
-  /** Update an entire range of the motion paths. */
-  ANIMVIZ_CALC_RANGE_FULL,
-};
+namespace ed::motionpath {
+/**
+ * Tag the motion path for a complete re-evaluation on the next call to `animviz_calc_motionpaths`.
+ * This is cheap to call since it only sets a flag.
+ */
+void tag_for_recalc(bMotionPath &motion_path);
+}  // namespace ed::motionpath
 
 /**
  * Build a partial depsgraph with only the IDs of the given `targets`.
@@ -1295,15 +1293,27 @@ Depsgraph *animviz_depsgraph_build(Main *bmain,
                                    Span<MPathTarget> targets);
 
 /**
+ * Sets the preview location to be the evaluated world space position on each target.
+ * See motionpath::Runtime::preview_location for more info on the preview location.
+ */
+void animviz_update_motionpath_preview(Depsgraph &depsgraph, Span<MPathTarget> targets);
+/**
+ * Clears the preview location on all targets.
+ * See motionpath::Runtime::preview_location for more info on the preview location.
+ */
+void animviz_clear_motionpath_preview(Span<MPathTarget> targets);
+
+/**
  * Evaluated the given `depsgraph` for all targets.
  *
- * \param range: determines which frames the Depsgraph is evaluated for.
- * This can have big performance implications.
+ * \param modified_frame: Determines around which the calculation should be run. It will stop
+ * automatically if it hits an area where the evaluation returns the same result as is already
+ * stored in the motion path. This is to minimize the calculations done.
  */
 void animviz_calc_motionpaths(Depsgraph *depsgraph,
                               Scene *scene,
                               MutableSpan<MPathTarget> targets,
-                              eAnimvizCalcRange range);
+                              int modified_frame);
 
 /**
  * Update motion path computation range (in `ob.avs` or `armature.avs`) from user choice in
@@ -1321,6 +1331,10 @@ void animviz_motionpath_compute_range(Object *ob, Scene *scene);
 void animviz_build_motionpath_targets(Object *ob, Vector<MPathTarget> &r_targets);
 
 /** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name F-Curve Buffers & Rotation Conversion
+ * \{ */
 
 /**
  * A non owning storage buffer for FCurves where they are sorted by `FCurve.array_index`.
@@ -1376,5 +1390,7 @@ void convert_to_rotation_mode(bContext &C,
                               ed::AnimTransformable &transformable,
                               eRotationModes to_mode,
                               bool bake);
+
+/** \} */
 
 }  // namespace blender

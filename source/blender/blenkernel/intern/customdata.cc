@@ -1102,48 +1102,6 @@ static void layerInterp_shapekey(const void **sources, const float *weights, int
 /** \} */
 
 /* -------------------------------------------------------------------- */
-/** \name Callbacks for (#MVertSkin, #CD_MVERT_SKIN)
- * \{ */
-
-static void layerDefault_mvert_skin(void *data, const int count)
-{
-  MVertSkin *vs = static_cast<MVertSkin *>(data);
-
-  for (int i = 0; i < count; i++) {
-    copy_v3_fl(vs[i].radius, 0.25f);
-    vs[i].flag = eMVertSkinFlag{};
-  }
-}
-
-static void layerCopy_mvert_skin(const void *source, void *dest, const int count)
-{
-  memcpy(dest, source, sizeof(MVertSkin) * count);
-}
-
-static void layerInterp_mvert_skin(const void **sources,
-                                   const float *weights,
-                                   int count,
-                                   void *dest)
-{
-  float radius[3];
-  zero_v3(radius);
-
-  for (int i = 0; i < count; i++) {
-    const float interp_weight = weights[i];
-    const MVertSkin *vs_src = static_cast<const MVertSkin *>(sources[i]);
-
-    madd_v3_v3fl(radius, vs_src->radius, interp_weight);
-  }
-
-  /* Delay writing to the destination in case dest is in sources. */
-  MVertSkin *vs_dst = static_cast<MVertSkin *>(dest);
-  copy_v3_v3(vs_dst->radius, radius);
-  vs_dst->flag &= ~MVERT_SKIN_ROOT;
-}
-
-/** \} */
-
-/* -------------------------------------------------------------------- */
 /** \name Callbacks for (`short[4][3]`, #CD_TESSLOOPNORMAL)
  * \{ */
 
@@ -1845,15 +1803,12 @@ static const LayerTypeInfo LAYERTYPEINFO[CD_NUMTYPES] = {
         .free = layerFree_grid_paint_mask,
         .construct = layerConstruct_grid_paint_mask,
     },
-    /* 36: CD_MVERT_SKIN */
+    /* 36: CD_MVERT_SKIN */ /* DEPRECATED */
     {
         .size = sizeof(MVertSkin),
         .alignment = alignof(MVertSkin),
         .structname = "MVertSkin",
         .structnum = 1,
-        .copy = layerCopy_mvert_skin,
-        .interp = layerInterp_mvert_skin,
-        .set_default_value = layerDefault_mvert_skin,
     },
     /* 37: CD_FREESTYLE_EDGE */ /* DEPRECATED */
     {
@@ -2074,7 +2029,7 @@ const CustomData_MeshMasks CD_MASK_BAREMESH_ORIGINDEX = {
     /*lmask*/ CD_MASK_PROP_INT32,
 };
 const CustomData_MeshMasks CD_MASK_MESH = {
-    /*vmask*/ (CD_MASK_PROP_FLOAT3 | CD_MASK_MDEFORMVERT | CD_MASK_MVERT_SKIN | CD_MASK_PROP_ALL),
+    /*vmask*/ (CD_MASK_PROP_FLOAT3 | CD_MASK_MDEFORMVERT | CD_MASK_PROP_ALL),
     /*emask*/
     CD_MASK_PROP_ALL,
     /*fmask*/ 0,
@@ -2084,8 +2039,8 @@ const CustomData_MeshMasks CD_MASK_MESH = {
     (CD_MASK_MDISPS | CD_MASK_GRID_PAINT_MASK | CD_MASK_PROP_ALL),
 };
 const CustomData_MeshMasks CD_MASK_DERIVEDMESH = {
-    /*vmask*/ (CD_MASK_ORIGINDEX | CD_MASK_MDEFORMVERT | CD_MASK_SHAPEKEY | CD_MASK_MVERT_SKIN |
-               CD_MASK_ORCO | CD_MASK_CLOTH_ORCO | CD_MASK_PROP_ALL),
+    /*vmask*/ (CD_MASK_ORIGINDEX | CD_MASK_MDEFORMVERT | CD_MASK_SHAPEKEY | CD_MASK_ORCO |
+               CD_MASK_CLOTH_ORCO | CD_MASK_PROP_ALL),
     /*emask*/
     (CD_MASK_ORIGINDEX | CD_MASK_PROP_ALL),
     /*fmask*/ (CD_MASK_ORIGINDEX | CD_MASK_ORIGSPACE),
@@ -2095,8 +2050,7 @@ const CustomData_MeshMasks CD_MASK_DERIVEDMESH = {
     (CD_MASK_ORIGSPACE_MLOOP | CD_MASK_PROP_ALL), /* XXX: MISSING #CD_MASK_MLOOPTANGENT ? */
 };
 const CustomData_MeshMasks CD_MASK_BMESH = {
-    /*vmask*/ (CD_MASK_MDEFORMVERT | CD_MASK_MVERT_SKIN | CD_MASK_SHAPEKEY |
-               CD_MASK_SHAPE_KEYINDEX | CD_MASK_PROP_ALL),
+    /*vmask*/ (CD_MASK_MDEFORMVERT | CD_MASK_SHAPEKEY | CD_MASK_SHAPE_KEYINDEX | CD_MASK_PROP_ALL),
     /*emask*/ CD_MASK_PROP_ALL,
     /*fmask*/ 0,
     /*pmask*/
@@ -2105,9 +2059,8 @@ const CustomData_MeshMasks CD_MASK_BMESH = {
     (CD_MASK_MDISPS | CD_MASK_GRID_PAINT_MASK | CD_MASK_PROP_ALL),
 };
 const CustomData_MeshMasks CD_MASK_EVERYTHING = {
-    /*vmask*/ (CD_MASK_BM_ELEM_PYPTR | CD_MASK_ORIGINDEX | CD_MASK_MDEFORMVERT |
-               CD_MASK_MVERT_SKIN | CD_MASK_ORCO | CD_MASK_CLOTH_ORCO | CD_MASK_SHAPEKEY |
-               CD_MASK_SHAPE_KEYINDEX | CD_MASK_PROP_ALL),
+    /*vmask*/ (CD_MASK_BM_ELEM_PYPTR | CD_MASK_ORIGINDEX | CD_MASK_MDEFORMVERT | CD_MASK_ORCO |
+               CD_MASK_CLOTH_ORCO | CD_MASK_SHAPEKEY | CD_MASK_SHAPE_KEYINDEX | CD_MASK_PROP_ALL),
     /*emask*/
     (CD_MASK_BM_ELEM_PYPTR | CD_MASK_ORIGINDEX | CD_MASK_PROP_ALL),
     /*fmask*/
@@ -2379,10 +2332,9 @@ class CustomDataLayerImplicitSharing : public ImplicitSharingInfo {
   }
 };
 
-/** Create a #ImplicitSharingInfo that takes ownership of the data. */
-static const ImplicitSharingInfo *make_implicit_sharing_info_for_layer(const eCustomDataType type,
-                                                                       const void *data,
-                                                                       const int totelem)
+const ImplicitSharingInfo *CustomData_make_layer_sharing_info(const eCustomDataType type,
+                                                              const void *data,
+                                                              const int totelem)
 {
   return MEM_new<CustomDataLayerImplicitSharing>(__func__, data, totelem, type);
 }
@@ -2406,7 +2358,7 @@ static void ensure_layer_data_is_mutable(CustomDataLayer &layer, const int totel
      * we're still copying from it here. */
     layer.data = copy_layer_data(type, old_data, totelem);
     layer.sharing_info->remove_user_and_delete_if_last();
-    layer.sharing_info = make_implicit_sharing_info_for_layer(type, layer.data, totelem);
+    layer.sharing_info = CustomData_make_layer_sharing_info(type, layer.data, totelem);
   }
 }
 
@@ -2464,7 +2416,7 @@ void CustomData_realloc(CustomData *data,
     /* Take ownership of new array. */
     layer->data = new_layer_data;
     if (layer->data) {
-      layer->sharing_info = make_implicit_sharing_info_for_layer(
+      layer->sharing_info = CustomData_make_layer_sharing_info(
           eCustomDataType(layer->type), layer->data, new_size);
     }
 
@@ -2861,7 +2813,7 @@ static CustomDataLayer *customData_add_layer__internal(
 
   if (new_layer.data != nullptr && new_layer.sharing_info == nullptr) {
     /* Make layer data shareable. */
-    new_layer.sharing_info = make_implicit_sharing_info_for_layer(type, new_layer.data, totelem);
+    new_layer.sharing_info = CustomData_make_layer_sharing_info(type, new_layer.data, totelem);
   }
 
   new_layer.type = type;
@@ -2877,6 +2829,9 @@ static CustomDataLayer *customData_add_layer__internal(
   if (!name.is_empty()) {
     name.copy_utf8_truncated(new_layer.name);
     CustomData_set_layer_unique_name(data, index);
+    if (STR_ELEM(new_layer.name, "skin_modifier_root", "skin_modifier_loose")) {
+      new_layer.flag |= CD_FLAG_RUNTIME_NOINTERP;
+    }
   }
   else {
     new_layer.name[0] = '\0';
@@ -3994,6 +3949,11 @@ void CustomData_bmesh_interp_n(CustomData *data,
   BLI_assert(count > 0);
 
   CustomDataLayer *layer = &data->layers[n];
+  if (layer->flag & CD_FLAG_RUNTIME_NOINTERP) {
+    CustomData_data_set_default_value(eCustomDataType(layer->type), dst_block_ofs);
+    return;
+  }
+
   const LayerTypeInfo *typeInfo = layerType_getInfo(eCustomDataType(layer->type));
 
   typeInfo->interp(src_blocks_ofs, weights, count, dst_block_ofs);
@@ -4772,6 +4732,7 @@ void CustomData_blend_write_prepare(CustomData &data, Vector<CustomDataLayer, 16
      * runtime only). */
     BLI_assert((CD_TYPE_AS_MASK(eCustomDataType(layer.type)) & CD_MASK_PROP_ALL) == 0);
     layers_to_write.append(layer);
+    layers_to_write.last().flag &= ~CD_FLAG_RUNTIME_NOINTERP;
   }
   data.totlayer = layers_to_write.size();
   data.maxlayer = data.totlayer;
@@ -4861,7 +4822,7 @@ static void blend_write_layer_data(BlendWriter *writer,
         int datasize = structnum * count;
         writer->write_struct_array_by_name(structname, datasize, layer.data);
       }
-      else if (!BLO_write_is_undo(writer)) { /* Do not warn on undo. */
+      else if (!writer->is_undo()) { /* Do not warn on undo. */
         printf("%s error: layer '%s':%d - can't be written to file\n",
                __func__,
                structname,
@@ -4879,13 +4840,13 @@ void CustomData_blend_write(BlendWriter *writer,
                             ID *id)
 {
   /* write external customdata (not for undo) */
-  if (data->external && !BLO_write_is_undo(writer)) {
-    CustomData_external_write(data, BLO_write_filepath(writer), id, cddata_mask, count, 0);
+  if (data->external && !writer->is_undo()) {
+    CustomData_external_write(data, writer->filepath(), id, cddata_mask, count, 0);
   }
 
   for (const CustomDataLayer &layer : layers_to_write) {
     const size_t size_in_bytes = CustomData_sizeof(eCustomDataType(layer.type)) * count;
-    BLO_write_shared(writer, layer.data, size_in_bytes, layer.sharing_info, [&]() {
+    writer->write_shared(layer.data, size_in_bytes, layer.sharing_info, [&]() {
       blend_write_layer_data(writer, layer, count);
     });
   }
@@ -5024,6 +4985,7 @@ void CustomData_blend_read(BlendDataReader *reader, CustomData *data, const int 
     if (layer->flag & CD_FLAG_EXTERNAL) {
       layer->flag &= ~CD_FLAG_IN_MEMORY;
     }
+    layer->flag &= ~CD_FLAG_RUNTIME_NOINTERP;
     layer->sharing_info = nullptr;
 
     if (CustomData_verify_versions(data, i)) {
@@ -5033,7 +4995,7 @@ void CustomData_blend_read(BlendDataReader *reader, CustomData *data, const int 
             if (layer->data == nullptr) {
               return nullptr;
             }
-            return make_implicit_sharing_info_for_layer(
+            return CustomData_make_layer_sharing_info(
                 eCustomDataType(layer->type), layer->data, count);
           });
       i++;
@@ -5066,20 +5028,17 @@ void CustomData_debug_info_from_layers(const CustomData *data, const char *inden
       const char *name = CustomData_layertype_name(type);
       const int size = CustomData_sizeof(type);
       const void *pt = CustomData_get_layer(data, type);
-      const int pt_size = pt ? int(MEM_allocN_len(pt) / size) : 0;
       const char *structname;
       int structnum;
       get_type_file_write_info(type, &structname, &structnum);
-      BLI_dynstr_appendf(
-          dynstr,
-          "%sdict(name='%s', struct='%s', type=%d, ptr='%p', elem=%d, length=%d),\n",
-          indent,
-          name,
-          structname,
-          type,
-          pt,
-          size,
-          pt_size);
+      BLI_dynstr_appendf(dynstr,
+                         "%sdict(name='%s', struct='%s', type=%d, ptr='%p', elem=%d),\n",
+                         indent,
+                         name,
+                         structname,
+                         type,
+                         pt,
+                         size);
     }
   }
 }

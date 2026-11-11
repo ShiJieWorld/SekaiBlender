@@ -2,9 +2,14 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup nodes
+ */
+
 #include "DNA_material_types.h"
 #include "DNA_node_types.h"
 #include "DNA_object_types.h"
+#include "DNA_pointcloud_types.h"
 #include "DNA_world_types.h"
 
 #include "BKE_context.hh"
@@ -37,6 +42,11 @@ void node_tree_shader_default(const bContext *C, Main *bmain, ID *id)
 
     if (ob && ob->type == OB_VOLUME) {
       ma_default = BKE_material_default_volume();
+    }
+    else if (ob && ob->type == OB_POINTCLOUD && ob->data &&
+             id_cast<const PointCloud *>(ob->data)->type == PointCloudType::GSplat)
+    {
+      ma_default = BKE_material_default_gsplat();
     }
     else {
       ma_default = BKE_material_default_surface();
@@ -102,26 +112,6 @@ void node_tree_shader_default(const bContext *C, Main *bmain, ID *id)
   }
 }
 
-void node_tree_composit_default(const bContext *C, Scene *sce)
-{
-  Main *bmain = CTX_data_main(C);
-
-  /* but lets check it anyway */
-  if (sce->compositing_node_group) {
-    if (G.debug & G_DEBUG) {
-      printf("error in composite initialize\n");
-    }
-    return;
-  }
-
-  sce->compositing_node_group = bke::node_tree_add_tree(
-      bmain, DATA_("Compositor Nodes"), ntreeType_Composite->idname.ref());
-
-  node_tree_composit_default_init(C, sce->compositing_node_group);
-
-  BKE_ntree_update_after_single_tree_change(*bmain, *sce->compositing_node_group);
-}
-
 void node_tree_composit_default_init(const bContext *C, bNodeTree *ntree)
 {
   BLI_assert(ntree != nullptr && ntree->type == NTREE_COMPOSIT);
@@ -147,15 +137,13 @@ void node_tree_composit_default_init(const bContext *C, bNodeTree *ntree)
   bke::node_set_active(*ntree, *in);
   in->flag &= ~NODE_PREVIEW;
 
-  bNodeSocket *image_out = reinterpret_cast<bNodeSocket *>(in->outputs.first);
-  bke::node_add_link(
-      *ntree, *in, *image_out, *composite, *reinterpret_cast<bNodeSocket *>(composite->inputs.first));
+  bNodeSocket *image_out = in->outputs.first();
+  bke::node_add_link(*ntree, *in, *image_out, *composite, *composite->inputs.first());
 
   bNode *viewer = bke::node_add_static_node(C, *ntree, CMP_NODE_VIEWER);
   viewer->location[0] = 200.0f;
   viewer->location[1] = -80.0f;
-  bke::node_add_link(
-      *ntree, *in, *image_out, *viewer, *reinterpret_cast<bNodeSocket *>(viewer->inputs.first));
+  bke::node_add_link(*ntree, *in, *image_out, *viewer, *viewer->inputs.first());
 
   BKE_ntree_update_after_single_tree_change(*CTX_data_main(C), *ntree);
 }

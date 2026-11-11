@@ -615,8 +615,7 @@ static void loose_data_instantiate_obdata_preprocess(
  * (return false). */
 static bool loose_data_instantiate_collection_parents_check_recursive(Collection *collection)
 {
-  for (CollectionParent *parent_collection =
-           static_cast<CollectionParent *>(collection->runtime->parents.first);
+  for (CollectionParent *parent_collection = collection->runtime->parents.first();
        parent_collection != nullptr;
        parent_collection = parent_collection->next)
   {
@@ -1073,6 +1072,7 @@ static bool foreach_libblock_link_append_common_processing(
 
 /** \} */
 
+/* -------------------------------------------------------------------- */
 /** \name Library packing code.
  * \{ */
 
@@ -1123,19 +1123,30 @@ void BKE_blendfile_link_pack(BlendfileLinkAppendContext *lapp_context, ReportLis
       continue;
     }
     BLI_assert(ID_IS_LINKED(id));
-    if (!(ID_IS_PACKED(id) || (id->newid && ID_IS_PACKED(id->newid)))) {
+    /* Shape keys should always have been already packed by their owner ID.
+     *
+     * This might not always be true, in case the owner of the shapekey failed to be packed for
+     * some reason, in that case do not attempt to pack the shapekey either. */
+    if (id->id_type() != ID_KE && !(ID_IS_PACKED(id) || (id->newid && ID_IS_PACKED(id->newid)))) {
       /* No yet packed. */
-      bke::library::pack_linked_id_hierarchy(*bmain, *id);
+      Set<ID *> ids_to_pack = bke::library::pack_linked_id_hierarchy(*bmain, *id);
+
+      /* If packing failed, do not delete the linked versions of the whole hierarchy. Packing is
+       * all or nothing, but IDs shared with another hierarchy may still have been packed with
+       * that one, and remain used by this linked hierarchy. */
+      if (!id->newid || !ID_IS_PACKED(id->newid)) {
+        for (ID *id_iter : ids_to_pack) {
+          linked_ids_to_delete.remove(id_iter);
+          if (Key *key = BKE_key_from_id(id_iter)) {
+            linked_ids_to_delete.remove(&key->id);
+          }
+        }
+      }
     }
     /* Calling code may want to access newly packed embedded IDs from the link/append context
      * items. */
     if (id->newid) {
       BKE_blendfile_link_append_context_item_newid_set(lapp_context, &item, id->newid);
-    }
-
-    /* If packing failed for a linked ID, do not delete its linked version. */
-    if (!ID_IS_PACKED(item.new_id) && linked_ids_to_delete.contains(id)) {
-      linked_ids_to_delete.remove(id);
     }
   }
   BKE_main_id_newptr_and_tag_clear(bmain);
@@ -1145,6 +1156,7 @@ void BKE_blendfile_link_pack(BlendfileLinkAppendContext *lapp_context, ReportLis
 
 /** \} */
 
+/* -------------------------------------------------------------------- */
 /** \name Library append code.
  * \{ */
 
@@ -1651,6 +1663,7 @@ void BKE_blendfile_append(BlendfileLinkAppendContext *lapp_context, ReportList *
 
 /** \} */
 
+/* -------------------------------------------------------------------- */
 /** \name Library link code.
  * \{ */
 
@@ -1939,6 +1952,7 @@ void BKE_blendfile_override(BlendfileLinkAppendContext *lapp_context,
 
 /** \} */
 
+/* -------------------------------------------------------------------- */
 /** \name Library relocating code.
  * \{ */
 
@@ -2155,7 +2169,7 @@ static void blendfile_relocate_postprocess_cleanup(BlendfileLinkAppendContext &l
           ViewLayer *new_view_layer = BKE_view_layer_find(
               new_scene, lapp_context.params->context.view_layer->name);
           lapp_context.params->context.view_layer = static_cast<ViewLayer *>(
-              (new_view_layer != nullptr) ? new_view_layer : new_scene->view_layers.first);
+              (new_view_layer != nullptr) ? new_view_layer : new_scene->view_layers.first());
         }
         /* lapp_context->params->context.v3d should never be made invalid by newly linked data
          * here, as it is UI data, ultimately owned by a #bScreen ID, which is not linkable. */
@@ -2262,7 +2276,7 @@ void BKE_blendfile_library_relocate(BlendfileLinkAppendContext *lapp_context,
   MainListsArray lbarray = BKE_main_lists_get(*bmain);
   int lba_idx = lbarray.size();
   while (lba_idx--) {
-    ID *id = static_cast<ID *>(lbarray[lba_idx]->first);
+    ID *id = lbarray[lba_idx]->first();
     const short idcode = id ? id->id_type() : 0;
 
     if (!id || !BKE_idtype_idcode_is_linkable(idcode)) {

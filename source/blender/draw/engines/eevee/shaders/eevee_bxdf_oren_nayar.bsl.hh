@@ -6,7 +6,9 @@
 
 #include "eevee_bxdf_types.bsl.hh"
 #include "eevee_ltc_lut_lib.bsl.hh"
-#include "gpu_shader_ray_lib.glsl"
+#include "gpu_shader_ray.bsl.hh"
+
+#if 0 /* Unfinished. */
 
 /* -------------------------------------------------------------------- */
 /** \name Oren Nayar BSDF
@@ -81,3 +83,5 @@ ClosureLight bxdf_oren_nayar_light(ClosureUndetermined cl, float3 V)
 }
 
 /** \} */
+
+#endif

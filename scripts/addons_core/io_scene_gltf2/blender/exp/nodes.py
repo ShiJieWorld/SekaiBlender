@@ -333,21 +333,28 @@ def __gather_mesh(vnode, blender_object, export_settings):
                 depsgraph = bpy.context.evaluated_depsgraph_get()
                 blender_data_owner = blender_object.evaluated_get(depsgraph)
                 blender_data = blender_data_owner.to_mesh(preserve_all_data_layers=True, depsgraph=depsgraph)
-                # Seems now (from 4.2) the custom properties are Statically Typed
-                # so no need to copy them in that case, because overwriting them will crash
+                # We have different behavior depending if the file was created before 4.2 or after
+                # Before 4.2:
+                # - Custom properties are duplicated in Custom Props & Sys Prop, and are propagated to the evaluated mesh
+                # After 4.2:
+                # - Custom properties & system properties are not propagated to the evaluated mesh
                 if len(blender_data.keys()) == 0:
-                    # Copy custom properties
-                    for prop in [p for p in blender_object.data.keys() if (
-                            (p not in BLACK_LIST) or p.startswith("gltf"))]:
+                    # Data were created by a recent Blender version (4.2 or later)
+                    # So we need to copy custom properties to the evaluated mesh
+                    for prop in blender_object.data.keys():
                         blender_data[prop] = blender_object.data[prop]
+                    # We can not copy sys props into the new evaluated mesh, as some of them are read-only
+                    # So we will store the original mesh into a custom prop, and then access it when needed
                 else:
-                    # But we need to remove some properties that are not needed
-                    for prop in [p for p in blender_object.data.keys() if (
-                            p in BLACK_LIST and not p.startswith("gltf"))]:
-                        del blender_data[prop]
+                    # Data were created by an older Blender version (before 4.2)
+                    # So custom properties & sys props are already propagated to the evaluated mesh
+                    pass
                 # Store the fact that this evaluated data has been created by the
                 # exporter, and is not a GN instance data
                 blender_data['gltf2_mesh_applied'] = True
+
+                # Used with sys props (and internally for Variants)
+                blender_data['gltf2_original_mesh'] = blender_object.data
 
                 if export_settings['gltf_skins']:
                     # restore Armature modifiers
@@ -369,7 +376,7 @@ def __gather_mesh(vnode, blender_object, export_settings):
             if not export_settings['gltf_skins']:
                 modifiers = None
             else:
-                # Check if there is an armature modidier
+                # Check if there is an armature modifier
                 if len([mod for mod in blender_object.modifiers if mod.type == "ARMATURE"]) == 0:
                     modifiers = None
 
@@ -403,16 +410,12 @@ def __gather_mesh(vnode, blender_object, export_settings):
 
 
 def __keep_mesh_info(original, mesh, export_settings):
-    if 'mesh_identifiers' not in export_settings.keys():
-        export_settings['mesh_identifiers'] = {}
     export_settings['mesh_identifiers'][id(mesh)] = {}
     export_settings['mesh_identifiers'][id(mesh)]['blender'] = original
 
 
 def __keep_material_info(materials, originals, export_settings):
     for m in [m for m in materials if m is not None]:
-        if 'material_identifiers' not in export_settings.keys():
-            export_settings['material_identifiers'] = {}
         if originals is True:
             export_settings['material_identifiers'][id(m)] = {}
             export_settings['material_identifiers'][id(m)]['blender'] = m
@@ -449,6 +452,7 @@ def __gather_mesh_from_blender_nonmesh(vnode, blender_object, export_settings):
         needs_to_mesh_clear = True
 
         materials = tuple([ms.material for ms in blender_object.material_slots if ms.material is not None])
+        __keep_material_info(materials, True, export_settings)
         modifiers = None
         blender_object_for_skined_data = None
 
@@ -485,13 +489,10 @@ def __gather_name(blender_object, export_settings):
 def __gather_trans_rot_scale(vnode, export_settings):
     if vnode.parent_uuid is None:
         # No parent, so matrix is world matrix, except if we export a collection
-        if export_settings['gltf_collection'] and export_settings['gltf_at_collection_center']:
+        trans, rot, sca = vnode.matrix_world.decompose()
+        if export_settings['gltf_collection'] and export_settings['gltf_collection_center_mode'] != 'WORLD_ORIGIN':
             # If collection, we need to take into account the collection offset
-            trans, rot, sca = vnode.matrix_world.decompose()
             trans -= export_settings['gltf_collection_center']
-        else:
-            # No parent, so matrix is world matrix
-            trans, rot, sca = vnode.matrix_world.decompose()
     else:
         # calculate local matrix
         if export_settings['vtree'].nodes[vnode.parent_uuid].skin is None:
@@ -577,13 +578,17 @@ def gather_skin(vnode, export_settings):
         return None
 
     # Prevent infinite recursive error. A data can't have an Armature modifier
-    # and be bone parented to a bone of this armature
+    # and be bone parented to a bone of this armature, directly or through an
+    # ancestor. Otherwise the skin's joint becomes an ancestor of this node in
+    # the exported hierarchy, forming a cycle (skin -> joint -> ... -> node).
     # In that case, ignore the armature modifier, keep only the bone parenting
-    if blender_object.parent is not None \
-            and blender_object.parent_type == 'BONE' \
-            and blender_object.parent.name == modifiers["ARMATURE"].object.name:
-
-        return None
+    ancestor = blender_object
+    while ancestor is not None:
+        if ancestor.parent is not None \
+                and ancestor.parent_type == 'BONE' \
+                and ancestor.parent.name == modifiers["ARMATURE"].object.name:
+            return None
+        ancestor = ancestor.parent
 
     # glTF Skins and mesh must be in the same glTF node, which is different from how blender handles armatures
     return gltf2_blender_gather_skins.gather_skin(export_settings['vtree'].nodes[vnode].armature, export_settings)

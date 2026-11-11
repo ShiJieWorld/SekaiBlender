@@ -21,6 +21,7 @@
 #include "DNA_scene_types.h"
 
 #include "BKE_blender_undo.hh"
+#include "BKE_compositor.hh"
 #include "BKE_context.hh"
 #include "BKE_lib_query.hh"
 #include "BKE_main.hh"
@@ -183,7 +184,8 @@ static void memfile_undosys_step_decode(
   ED_editors_exit(bmain, false);
   /* Ensure there's no preview job running. Unfinished previews will be scheduled for regeneration
    * via #PRV_TAG_RESTART_RENDERING in BKE_previewimg_blend_read. */
-  ED_preview_kill_jobs(CTX_wm_manager(C), bmain);
+  ED_preview_kill_jobs_for_undo(CTX_wm_manager(C), bmain);
+  const bool need_preview_render_restart = bmain->need_preview_render_restart;
 
   MemFileUndoStep *us = reinterpret_cast<MemFileUndoStep *>(us_p);
   BKE_memfile_undo_decode(us->data, undo_direction, use_old_bmain_data, C);
@@ -205,6 +207,10 @@ static void memfile_undosys_step_decode(
   bmain = CTX_data_main(C);
   ED_editors_init_for_undo(bmain);
 
+  /* Cancelled preview jobs set this on the old bmain, carry it over to
+   * restart previews that were interrupted. */
+  bmain->need_preview_render_restart |= need_preview_render_restart;
+
   if (use_old_bmain_data) {
     /* Restore previous depsgraphs into current bmain. */
     BKE_scene_undo_depsgraphs_restore(bmain, depsgraphs);
@@ -224,7 +230,7 @@ static void memfile_undosys_step_decode(
          * #BKE_scene_undo_depsgraphs_restore but this is currently only done for depsgraphs in the
          * scene.depsgraph_hash map. So the safest option is to just delete the following
          * depsgraphs for now. */
-        if (scene->compositing_node_group) {
+        if (bke::compositor::is_enabled(*scene, bke::compositor::ExecutionMode::Preview)) {
           /* Ensure undo calls from the UI update the interactive compositor preview depsgraph, see
            * #compo_initjob. */
           bke::CompositorRuntime &compositor_runtime = scene->runtime->compositor;

@@ -12,6 +12,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "DNA_space_types.h"
 #include "MEM_guardedalloc.h"
 
 #include "BLI_listbase.hh"
@@ -69,6 +70,8 @@
 #include "RNA_define.hh"
 
 #include "IMB_colormanagement.hh"
+
+#include "mesh_paint.hh"
 
 #include "../paint_intern.hh"
 
@@ -426,7 +429,7 @@ bool get_imapaint_zoom(bContext *C, float *zoomx, float *zoomy)
 {
   ScrArea *area = CTX_wm_area(C);
   if (area && area->spacetype == SPACE_IMAGE) {
-    SpaceImage *sima = static_cast<SpaceImage *>(area->spacedata.first);
+    SpaceImage *sima = area->spacedata.first_as<SpaceImage>();
     if (sima->mode == SI_MODE_PAINT) {
       ARegion *region = CTX_wm_region(C);
       ED_space_image_get_zoom(sima, region, zoomx, zoomy);
@@ -453,7 +456,7 @@ static void toggle_paint_cursor(Scene &scene, bool enable)
   if (p.runtime->paint_cursor && !enable) {
     WM_paint_cursor_end(static_cast<wmPaintCursor *>(p.runtime->paint_cursor));
     p.runtime->paint_cursor = nullptr;
-    paint_cursor_delete_textures();
+    bke::paint::cursor_reinitialize_textures(p);
   }
   else if (enable) {
     ED_paint_cursor_start(&p, ED_image_tools_paint_poll);
@@ -471,7 +474,7 @@ void ED_space_image_paint_update(Main *bmain, wmWindowManager *wm, Scene *scene)
 
     for (ScrArea &area : screen->areabase) {
       if (area.spacetype == SPACE_IMAGE) {
-        if ((static_cast<SpaceImage *>(area.spacedata.first))->mode == SI_MODE_PAINT) {
+        if ((area.spacedata.first_as<SpaceImage>())->mode == SI_MODE_PAINT) {
           enabled = true;
         }
       }
@@ -484,7 +487,7 @@ void ED_space_image_paint_update(Main *bmain, wmWindowManager *wm, Scene *scene)
     ED_paint_cursor_start(&imapaint->paint, ED_image_tools_paint_poll);
   }
   else {
-    paint_cursor_delete_textures();
+    bke::paint::cursor_reinitialize_textures(imapaint->paint);
   }
 }
 
@@ -647,29 +650,26 @@ void ED_object_texture_paint_mode_enter_ex(Main &bmain,
     ED_space_image_sync(&bmain, ima, false);
   }
 
-  ob.mode |= OB_MODE_TEXTURE_PAINT;
-
-  BKE_paint_init(&bmain, &scene, PaintMode::Texture3D);
-
-  BKE_paint_brushes_validate(&bmain, &imapaint.paint);
-
-  if (U.glreslimit != 0) {
-    BKE_image_free_all_gpu_texture_caches(&bmain);
+  if (USER_EXPERIMENTAL_TEST(&U, use_3d_texture_paint)) {
+    ed::sculpt_paint::mode_enter_generic(bmain, depsgraph, scene, ob, OB_MODE_TEXTURE_PAINT);
   }
-  BKE_image_paint_set_mipmap(&bmain, false);
+  else {
+    ob.mode |= OB_MODE_TEXTURE_PAINT;
+    BKE_paint_init(&bmain, &scene, PaintMode::Texture3D);
+    BKE_paint_brushes_validate(&bmain, &imapaint.paint);
+    toggle_paint_cursor(scene, true);
 
-  toggle_paint_cursor(scene, true);
+    Mesh *mesh = BKE_mesh_from_object(&ob);
+    BLI_assert(mesh != nullptr);
+    DEG_id_tag_update(&mesh->id, ID_RECALC_SYNC_TO_EVAL);
 
-  Mesh *mesh = BKE_mesh_from_object(&ob);
-  BLI_assert(mesh != nullptr);
-  DEG_id_tag_update(&mesh->id, ID_RECALC_SYNC_TO_EVAL);
+    /* Ensure we have evaluated data for bounding box. */
+    BKE_scene_graph_evaluated_ensure(&depsgraph, &bmain);
 
-  /* Ensure we have evaluated data for bounding box. */
-  BKE_scene_graph_evaluated_ensure(&depsgraph, &bmain);
-
-  /* Set pivot to bounding box center. */
-  Object *ob_eval = DEG_get_evaluated(&depsgraph, &ob);
-  paint_init_pivot(ob_eval ? ob_eval : &ob, &scene, &imapaint.paint);
+    /* Set pivot to bounding box center. */
+    Object *ob_eval = DEG_get_evaluated(&depsgraph, &ob);
+    paint_init_pivot(ob_eval ? ob_eval : &ob, &scene, &imapaint.paint);
+  }
 
   WM_main_add_notifier(NC_SCENE | ND_MODE, &scene);
 }
@@ -684,15 +684,16 @@ void ED_object_texture_paint_mode_enter(bContext *C)
   ED_object_texture_paint_mode_enter_ex(bmain, scene, depsgraph, ob);
 }
 
-void ED_object_texture_paint_mode_exit_ex(Main &bmain, Scene &scene, Object &ob)
+void ED_object_texture_paint_mode_exit_ex(Main & /*bmain*/, Scene &scene, Object &ob)
 {
-  ob.mode &= ~OB_MODE_TEXTURE_PAINT;
-
-  if (U.glreslimit != 0) {
-    BKE_image_free_all_gpu_texture_caches(&bmain);
+  if (USER_EXPERIMENTAL_TEST(&U, use_3d_texture_paint)) {
+    ed::sculpt_paint::mode_exit_generic(scene, ob, OB_MODE_TEXTURE_PAINT);
   }
-  BKE_image_paint_set_mipmap(&bmain, true);
-  toggle_paint_cursor(scene, false);
+  else {
+    ob.mode &= ~OB_MODE_TEXTURE_PAINT;
+
+    toggle_paint_cursor(scene, false);
+  }
 
   Mesh *mesh = BKE_mesh_from_object(&ob);
   BLI_assert(mesh != nullptr);
@@ -778,7 +779,7 @@ static wmOperatorStatus brush_colors_flip_exec(bContext *C, wmOperator * /*op*/)
   Paint *paint = BKE_paint_get_active_from_context(C);
   Brush *br = BKE_paint_brush(paint);
 
-  if (BKE_paint_use_unified_color(paint)) {
+  if (BKE_brush_use_unified_color(paint, br)) {
     UnifiedPaintSettings &ups = paint->unified_paint_settings;
     swap_v3_v3(ups.color, ups.secondary_color);
     BKE_brush_color_sync_legacy(&ups);
@@ -871,7 +872,7 @@ static bool texture_paint_object_poll(bContext *C)
   return false;
 }
 
-float3 seed_hsv_jitter()
+float3 BKE_paint_seed_hsv_jitter()
 {
   RandomNumberGenerator rng = RandomNumberGenerator::from_random_seed();
   return float3{rng.get_float(), rng.get_float(), rng.get_float()};

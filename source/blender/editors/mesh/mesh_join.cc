@@ -479,10 +479,12 @@ static void join_face_sets(const Span<const Object *> objects_to_join,
                            const OffsetIndices<int> face_ranges,
                            Mesh &dst_mesh)
 {
-  if (std::none_of(objects_to_join.begin(), objects_to_join.end(), [](const Object *object) {
-        const Mesh &mesh = *id_cast<const Mesh *>(object->data);
-        return mesh.attributes().contains(".sculpt_face_set");
-      }))
+  if (std::none_of(objects_to_join.begin(),
+                   objects_to_join.end(),
+                   [](const Object *object) {
+                     const Mesh &mesh = *id_cast<const Mesh *>(object->data);
+                     return mesh.attributes().contains(".sculpt_face_set");
+                   }))
   {
     return;
   }
@@ -697,10 +699,12 @@ wmOperatorStatus join_objects_exec(bContext *C, wmOperator *op)
             bmain, &src_object, true, object::multires_update_totlevels, &mmd->totlvl);
       }
     }
-    if (std::any_of(objects_to_join.begin(), objects_to_join.end(), [](const Object *object) {
-          const Mesh &src_mesh = *id_cast<const Mesh *>(object->data);
-          return CustomData_has_layer(&src_mesh.corner_data, CD_MDISPS);
-        }))
+    if (std::any_of(objects_to_join.begin(),
+                    objects_to_join.end(),
+                    [](const Object *object) {
+                      const Mesh &src_mesh = *id_cast<const Mesh *>(object->data);
+                      return CustomData_has_layer(&src_mesh.corner_data, CD_MDISPS);
+                    }))
     {
       MDisps *dst = static_cast<MDisps *>(CustomData_add_layer(
           &dst_mesh->corner_data, CD_MDISPS, CD_CONSTRUCT, dst_mesh->corners_num));
@@ -712,10 +716,12 @@ wmOperatorStatus join_objects_exec(bContext *C, wmOperator *op)
         }
       }
     }
-    if (std::any_of(objects_to_join.begin(), objects_to_join.end(), [](const Object *object) {
-          const Mesh &src_mesh = *id_cast<const Mesh *>(object->data);
-          return CustomData_has_layer(&src_mesh.corner_data, CD_GRID_PAINT_MASK);
-        }))
+    if (std::any_of(objects_to_join.begin(),
+                    objects_to_join.end(),
+                    [](const Object *object) {
+                      const Mesh &src_mesh = *id_cast<const Mesh *>(object->data);
+                      return CustomData_has_layer(&src_mesh.corner_data, CD_GRID_PAINT_MASK);
+                    }))
     {
       GridPaintMask *dst = static_cast<GridPaintMask *>(CustomData_add_layer(
           &dst_mesh->corner_data, CD_GRID_PAINT_MASK, CD_CONSTRUCT, dst_mesh->corners_num));
@@ -725,23 +731,6 @@ wmOperatorStatus join_objects_exec(bContext *C, wmOperator *op)
           CustomData_copy_elements(
               CD_GRID_PAINT_MASK, src, &dst[corner_ranges[i].first()], src_mesh.corners_num);
         }
-      }
-    }
-  }
-
-  /* Copy skin data to the out-of-main mesh. */
-  if (std::any_of(objects_to_join.begin(), objects_to_join.end(), [](const Object *object) {
-        const Mesh &src_mesh = *id_cast<const Mesh *>(object->data);
-        return CustomData_has_layer(&src_mesh.vert_data, CD_MVERT_SKIN);
-      }))
-  {
-    MVertSkin *dst = static_cast<MVertSkin *>(CustomData_add_layer(
-        &dst_mesh->vert_data, CD_MVERT_SKIN, CD_SET_DEFAULT, dst_mesh->verts_num));
-    for (const int i : objects_to_join.index_range()) {
-      const Mesh &src_mesh = *id_cast<const Mesh *>(objects_to_join[i]->data);
-      if (const void *src = CustomData_get_layer(&src_mesh.vert_data, CD_MVERT_SKIN)) {
-        CustomData_copy_elements(
-            CD_MVERT_SKIN, src, &dst[vert_ranges[i].first()], src_mesh.verts_num);
       }
     }
   }

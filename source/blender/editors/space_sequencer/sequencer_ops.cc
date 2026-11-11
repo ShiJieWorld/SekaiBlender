@@ -38,6 +38,7 @@ void sequencer_operatortypes()
   WM_operatortype_append(SEQUENCER_OT_duplicate);
   WM_operatortype_append(SEQUENCER_OT_delete);
   WM_operatortype_append(SEQUENCER_OT_ripple_delete);
+  WM_operatortype_append(SEQUENCER_OT_ripple_trim);
   WM_operatortype_append(SEQUENCER_OT_offset_clear);
   WM_operatortype_append(SEQUENCER_OT_images_separate);
   WM_operatortype_append(SEQUENCER_OT_meta_toggle);
@@ -118,6 +119,7 @@ void sequencer_operatortypes()
   WM_operatortype_append(SEQUENCER_OT_movie_strip_add);
   WM_operatortype_append(SEQUENCER_OT_sound_strip_add);
   WM_operatortype_append(SEQUENCER_OT_image_strip_add);
+  WM_operatortype_append(SEQUENCER_OT_text_strip_add);
   WM_operatortype_append(SEQUENCER_OT_effect_strip_add);
   WM_operatortype_append(SEQUENCER_OT_add_scene_strip_from_scene_asset);
 

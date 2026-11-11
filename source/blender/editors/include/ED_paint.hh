@@ -71,6 +71,9 @@ bool ED_paint_proj_mesh_data_check(Scene &scene,
 /**
  * The caller is responsible for running #ED_image_undo_push_end,
  * failure to do so causes an invalid state for the undo system.
+ *
+ * IMB_partial_update_* must be called before #ED_image_undo_push_end
+ * to efficiently detect full and partial updates to image buffers.
  */
 void ED_image_undo_push_begin(const char *name, PaintMode paint_mode);
 void ED_image_undo_push_begin_with_image(const char *name,
@@ -145,9 +148,9 @@ void ED_object_vpaintmode_enter(bContext *C, Depsgraph &depsgraph);
 void ED_object_wpaintmode_enter_ex(Main &bmain, Depsgraph &depsgraph, Scene &scene, Object &ob);
 void ED_object_wpaintmode_enter(bContext *C, Depsgraph &depsgraph);
 
-void ED_object_vpaintmode_exit_ex(Object &ob);
+void ED_object_vpaintmode_exit_ex(Scene &scene, Object &ob);
 void ED_object_vpaintmode_exit(bContext *C);
-void ED_object_wpaintmode_exit_ex(Object &ob);
+void ED_object_wpaintmode_exit_ex(Scene &scene, Object &ob);
 void ED_object_wpaintmode_exit(bContext *C);
 
 void ED_object_texture_paint_mode_enter_ex(Main &bmain,

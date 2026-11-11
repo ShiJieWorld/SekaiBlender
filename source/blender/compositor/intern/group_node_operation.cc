@@ -7,10 +7,17 @@
 #include "BLI_assert.hh"
 #include "BLI_vector.hh"
 
-#include "DNA_node_types.h"
+#include "BLT_translation.hh"
 
+#include "DNA_node_types.h"
+#include "DNA_userdef_types.h"
+
+#include "BKE_compute_context_cache.hh"
+#include "BKE_compute_contexts.hh"
 #include "BKE_node.hh"
 #include "BKE_node_runtime.hh"
+
+#include "DEG_depsgraph_query.hh"
 
 #include "COM_group_node_operation.hh"
 #include "COM_node_group_operation.hh"
@@ -24,15 +31,8 @@ namespace blender::compositor {
  * mapping its own inputs to the inputs of the node group operation and sharing its results with
  * the results of the node group operation. */
 class GroupNodeOperation : public NodeOperation {
- private:
-  /* The node group outputs needed by the caller. */
-  const NodeGroupOutputTypes needed_outputs_;
-
  public:
-  GroupNodeOperation(Context &context,
-                     const bNode &node,
-                     const NodeGroupOutputTypes needed_outputs)
-      : NodeOperation(context, node), needed_outputs_(needed_outputs)
+  GroupNodeOperation(Context &context, const bNode &node) : NodeOperation(context, node)
   {
     for (const bNodeSocket *input : node.input_sockets()) {
       if (!is_socket_available(input)) {
@@ -52,14 +52,23 @@ class GroupNodeOperation : public NodeOperation {
   void execute() override
   {
     const bNodeTree *node_group = this->get_node_group();
-    if (!node_group) {
+    const bNodeTree *original_node_group = DEG_get_original(node_group);
+    if (!original_node_group || ID_MISSING(original_node_group)) {
       this->allocate_default_remaining_outputs();
       return;
     }
 
-    const bke::GroupNodeComputeContext compute_context(
-        &this->get_compute_context(), this->node().identifier, &this->node().owner_tree());
-    NodeGroupOperation operation(this->context(), *node_group, needed_outputs_, compute_context);
+    if (this->get_compute_context().parents_num() >= U.nodes_stack_limit) {
+      this->add_warning(nodes::NodeWarningType::Error,
+                        TIP_("Stack limit reached. Group node is ignored."));
+      this->allocate_default_remaining_outputs();
+      return;
+    }
+
+    const bke::GroupNodeComputeContext &compute_context =
+        this->context().compute_context_cache().for_group_node(
+            &this->get_compute_context(), this->node().identifier, &this->node().owner_tree());
+    NodeGroupOperation operation(this->context(), *node_group, compute_context);
 
     this->set_reference_counts(operation);
     Vector<std::unique_ptr<Result>> temporary_inputs = this->map_inputs(operation);
@@ -121,11 +130,9 @@ class GroupNodeOperation : public NodeOperation {
   }
 };
 
-NodeOperation *get_group_node_operation(Context &context,
-                                        const bNode &node,
-                                        const NodeGroupOutputTypes &needed_outputs)
+NodeOperation *get_group_node_operation(Context &context, const bNode &node)
 {
-  return new GroupNodeOperation(context, node, needed_outputs);
+  return new GroupNodeOperation(context, node);
 }
 
 }  // namespace blender::compositor

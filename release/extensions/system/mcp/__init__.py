@@ -28,6 +28,28 @@ _PORT_MAX = 65535
 # Avoids adding work to Blender's startup sequence.
 _AUTOSTART_DELAY = 1.0
 
+# Polling defaults from the single-threaded bridge. These are migrated on
+# startup so existing preferences pick up the lower-latency defaults.
+_LEGACY_TIMER_DEFAULTS = (0.25, 1.0)
+
+
+def _apply_runtime_prefs(prefs: "bpy.types.AddonPreferences") -> None:
+    """Copy preferences to the server module, migrating legacy polling values."""
+    active = prefs.timer_interval_active
+    idle = prefs.timer_interval_idle
+    if (active, idle) == _LEGACY_TIMER_DEFAULTS:
+        active = mcp_to_blender_server.TIMER_INTERVAL_ACTIVE
+        idle = mcp_to_blender_server.TIMER_INTERVAL_IDLE
+        prefs.timer_interval_active = active
+        prefs.timer_interval_idle = idle
+    mcp_to_blender_server.timer_internal_vars_calc(
+        active=active,
+        idle=idle,
+        idle_delay=prefs.timer_interval_idle_delay,
+    )
+    mcp_to_blender_server.use_log = prefs.use_log
+    mcp_to_blender_server.execution_timeout = prefs.execution_timeout
+
 # Store the CLI handle, only for correct register/unregister.
 _cli_commands: list[object] = []
 
@@ -104,6 +126,7 @@ class _BlenderMCPPreferences(bpy.types.AddonPreferences):  # type: ignore[misc]
         description=(
             "Automatically start the Local AI Bridge when SekaiBlender starts.\n"
             "Without this, start it from Preferences after enabling Online Access.\n"
+            "(Also enabled when you start the bridge manually in this session.)\n"
             "(ignored in background mode)"
         ),
         # SekaiBlender ships this official Lab add-on but keeps listening off
@@ -142,8 +165,8 @@ class _BlenderMCPPreferences(bpy.types.AddonPreferences):  # type: ignore[misc]
     timer_interval_active: FloatProperty(  # type: ignore[valid-type]
         name="Timer Interval",
         description="Seconds between queue polling ticks in interactive mode",
-        default=0.25,
-        min=0.05,
+        default=mcp_to_blender_server.TIMER_INTERVAL_ACTIVE,
+        min=0.02,
         max=5.0,
         step=1,
         precision=2,
@@ -159,13 +182,32 @@ class _BlenderMCPPreferences(bpy.types.AddonPreferences):  # type: ignore[misc]
     timer_interval_idle: FloatProperty(  # type: ignore[valid-type]
         name="Timer Interval Idle",
         description="Seconds between queue polling ticks while idle (no pending work)",
-        default=1.0,
+        default=mcp_to_blender_server.TIMER_INTERVAL_IDLE,
         min=0.1,
         max=10.0,
         step=10,
         precision=2,
         subtype='TIME_ABSOLUTE',
         update=_update_timer_interval_idle,
+    )
+
+    def _update_execution_timeout(self, _context: bpy.types.Context) -> None:
+        mcp_to_blender_server.execution_timeout = self.execution_timeout
+
+    execution_timeout: FloatProperty(  # type: ignore[valid-type]
+        name="Execution Timeout",
+        description=(
+            "Maximum seconds a single request may occupy Blender's main thread "
+            "before it is interrupted (0 disables the watchdog).\n"
+            "Raises this for legitimate long imports or bakes"
+        ),
+        default=600.0,
+        min=0.0,
+        max=3600.0,
+        step=10,
+        precision=0,
+        subtype="TIME_ABSOLUTE",
+        update=_update_execution_timeout,
     )
 
     def _update_timer_interval_idle_delay(self, _context: bpy.types.Context) -> None:
@@ -195,6 +237,7 @@ class _BlenderMCPPreferences(bpy.types.AddonPreferences):  # type: ignore[misc]
         layout.prop(self, "timer_interval_active")
         layout.prop(self, "timer_interval_idle")
         layout.prop(self, "timer_interval_idle_delay")
+        layout.prop(self, "execution_timeout")
         layout.prop(self, "use_log")
 
         if mcp_to_blender_server.is_running():
@@ -227,23 +270,22 @@ class _BLMCP_OT_server_start(bpy.types.Operator):  # type: ignore[misc]
         # Clear any stale auto-start error so it does not persist in the UI.
         _State.startup_info_clear()
         prefs = context.preferences.addons[__package__].preferences
-        mcp_to_blender_server.timer_internal_vars_calc(
-            active=prefs.timer_interval_active,
-            idle=prefs.timer_interval_idle,
-            idle_delay=prefs.timer_interval_idle_delay,
-        )
-        mcp_to_blender_server.use_log = prefs.use_log
+        _apply_runtime_prefs(prefs)
         try:
             mcp_to_blender_server.start(prefs.host, prefs.port)
         except Exception as ex:  # pylint: disable=broad-exception-caught
             _State.startup_info_set_from_exception(ex)
             self.report({"ERROR"}, str(ex))
             return {"CANCELLED"}
+        # Remember the user's explicit manual start so the bridge returns with
+        # the next session. Clearing the Auto Start checkbox still opts out.
+        prefs.use_autostart = True
         bpy.app.timers.register(
             execute_interactive.run,
             first_interval=mcp_to_blender_server.TIMER_INTERVAL_ACTIVE,
             persistent=True)
-        self.report({"INFO"}, "Local AI Bridge started on {:s}:{:d}".format(prefs.host, prefs.port))
+        self.report({"INFO"}, "Local AI Bridge started on {:s}:{:d} (Auto Start enabled)".format(
+            prefs.host, prefs.port))
         return {"FINISHED"}
 
 
@@ -275,12 +317,7 @@ def _autostart_timer() -> None:
     if not _State.startup_online_ok_or_error():
         return
     prefs = bpy.context.preferences.addons[__package__].preferences
-    mcp_to_blender_server.timer_internal_vars_calc(
-        active=prefs.timer_interval_active,
-        idle=prefs.timer_interval_idle,
-        idle_delay=prefs.timer_interval_idle_delay,
-    )
-    mcp_to_blender_server.use_log = prefs.use_log
+    _apply_runtime_prefs(prefs)
 
     # This isn't expected:
     # - Maybe the operator is explicitly called as part of an automated action.

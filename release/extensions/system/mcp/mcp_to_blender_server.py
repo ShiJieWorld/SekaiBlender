@@ -15,6 +15,7 @@ __all__ = (
     "DEFAULT_HOST",
     "DEFAULT_PORT",
     "TIMER_INTERVAL_ACTIVE",
+    "TIMER_INTERVAL_IDLE",
     "is_running",
     "poll",
     "poll_blocking",
@@ -26,11 +27,15 @@ __all__ = (
     "use_log",
 )
 
+import bpy  # pylint: disable=import-error
 import json
 import math
+import queue
 import select
 import socket
 import sys
+import threading
+import time
 import traceback
 from collections.abc import Callable
 from typing import NamedTuple
@@ -39,9 +44,9 @@ DEFAULT_HOST = "localhost"
 DEFAULT_PORT = 9876
 
 # Seconds between main-thread timer ticks.
-TIMER_INTERVAL_ACTIVE = 0.05
+TIMER_INTERVAL_ACTIVE = 0.02
 # Seconds between main-thread timer ticks while idle (no pending work).
-_TIMER_INTERVAL_IDLE = 1.0
+TIMER_INTERVAL_IDLE = 0.1
 # Seconds of inactivity before switching to the idle interval.
 _TIMER_INTERVAL_IDLE_DELAY = 5.0
 
@@ -64,7 +69,7 @@ class _TimerState:
 
     def __init__(self) -> None:
         self.interval_active: float = TIMER_INTERVAL_ACTIVE
-        self.interval_idle: float = _TIMER_INTERVAL_IDLE
+        self.interval_idle: float = TIMER_INTERVAL_IDLE
         self.interval_idle_delay: float = _TIMER_INTERVAL_IDLE_DELAY
         # Number of active-rate ticks before switching to idle.
         self.idle_countdown_reset: int = 0
@@ -113,7 +118,7 @@ def timer_idle_interval() -> float:
     Return the appropriate timer interval, decrementing the idle countdown.
 
     Returns ``TIMER_INTERVAL_ACTIVE`` while the countdown is positive,
-    then ``_TIMER_INTERVAL_IDLE`` once it reaches zero.
+    then ``TIMER_INTERVAL_IDLE`` once it reaches zero.
     """
     if _timer.idle_countdown > 0:
         _timer.idle_countdown -= 1
@@ -124,14 +129,27 @@ def timer_idle_interval() -> float:
 # When True, print every request and response status to STDERR.
 use_log: bool = False
 
+# Maximum seconds a single request may occupy Blender's main thread before the
+# watchdog interrupts it. ``0`` disables the watchdog. Long imports/bakes may
+# need a higher value; an infinite loop otherwise freezes the whole application.
+execution_timeout: float = 600.0
+
 _MAX_REQUEST_BYTES = 10 * 1024 * 1024  # 10 MiB.
 # Maximum number of queued incoming connections.
-_LISTEN_BACKLOG = 5
+_LISTEN_BACKLOG = 128
 _RECV_BUFFER_SIZE = 4096
 # Seconds before a client that has not sent a complete request is closed.
 _CLIENT_TIMEOUT = 10.0
 # How often `poll_blocking` checks for shutdown.
 _POLL_BLOCKING_TIMEOUT = 1.0
+# Maximum time the main thread spends draining queued requests per timer tick.
+_SERVICE_BUDGET = 0.02
+# Maximum number of requests waiting for main-thread execution.
+_REQUEST_QUEUE_MAX = 1024
+# Maximum simultaneous sockets owned by the I/O thread (Windows select limit).
+_MAX_CLIENTS = 256
+_IO_SELECT_TIMEOUT = 0.05
+_ACCEPT_BATCH = 64
 _DEFERRED_UNSUPPORTED_MESSAGE = (
     "Deferred responses via `check_is_finished` are only supported "
     "by the interactive addon server, and are not available in "
@@ -206,9 +224,70 @@ def _encode_response(response: dict[str, object]) -> bytes:
     return (json.dumps(response) + "\0").encode("utf-8")
 
 
+class _ExecutionTimedOut(BaseException):
+    """
+    Raised by the watchdog tracer to abort a request that exceeded its deadline.
+    """
+
+
+class _ExecutionWatchdog:
+    """
+    Interrupt Python code that runs longer than *timeout* seconds.
+
+    Implemented with ``sys.settrace`` so the exception is raised inside the
+    executing code and cannot leak outside the guarded ``with`` block.
+    C-level calls (rendering, file I/O, etc.) are not interruptible; they are
+    bounded by their own duration.
+    """
+
+    __slots__ = ("_previous", "_deadline", "_timeout")
+
+    def __init__(self, timeout: float | None) -> None:
+        self._previous = None
+        self._deadline = time.monotonic() + timeout if timeout and timeout > 0.0 else None
+        self._timeout = timeout
+
+    def __enter__(self) -> "_ExecutionWatchdog":
+        if self._deadline is None:
+            return self
+        self._previous = sys.gettrace()
+        deadline = self._deadline
+        timeout = self._timeout
+        counter = 0
+
+        def _tracer(_frame: object, event: str, _arg: object) -> object:
+            nonlocal counter
+            if event == "line":
+                counter += 1
+                if counter >= 64:
+                    counter = 0
+                    if time.monotonic() >= deadline:
+                        raise _ExecutionTimedOut(
+                            "Execution exceeded the {:g}s bridge limit; "
+                            "the request was interrupted to keep SekaiBlender responsive. "
+                            "Raise the bridge execution timeout for legitimate long operations.".format(
+                                timeout,
+                            )
+                        )
+            return _tracer
+
+        sys.settrace(_tracer)
+        return self
+
+    def __exit__(
+            self,
+            exc_type: type[BaseException] | None,
+            exc_val: BaseException | None,
+            exc_tb: object,
+    ) -> None:
+        if self._deadline is not None:
+            sys.settrace(self._previous)
+
+
 def _execute_code(
         code: str,
         strict_json: bool,
+        timeout: float | None = None,
 ) -> _ExecResult:
     """
     Execute *code* and return an ``_ExecResult``.
@@ -220,16 +299,25 @@ def _execute_code(
         Only allow it to be false when executing arbitrary LLM generated code,
         in this case it's not worth the overhead of correcting the LLM mistake,
         just ``__repr__`` the value so it can fumble its way forward.
+    :param timeout: Override for the module-wide ``execution_timeout``.
     """
     from .capture_output import CaptureOutput
     from .weak_sandbox import WeakSandboxForLLM
 
+    effective_timeout = execution_timeout if timeout is None else timeout
     namespace: dict[str, object] = {"result": {}}
-    with CaptureOutput() as captured, WeakSandboxForLLM():
+    with CaptureOutput() as captured, WeakSandboxForLLM(), _ExecutionWatchdog(effective_timeout):
         try:
             exec(code, namespace)
+        except _ExecutionTimedOut as ex:
+            response: dict[str, object] = {"status": "error", "message": str(ex)}
+            if captured.stdout:
+                response["stdout"] = captured.stdout
+            if captured.stderr:
+                response["stderr"] = captured.stderr
+            return _ExecResult(response)
         except Exception:  # pylint: disable=broad-exception-caught
-            response: dict[str, object] = {"status": "error", "message": traceback.format_exc()}
+            response = {"status": "error", "message": traceback.format_exc()}
             if captured.stdout:
                 response["stdout"] = captured.stdout
             if captured.stderr:
@@ -282,6 +370,71 @@ def _execute_code(
     return _ExecResult(response)
 
 
+def _parse_request(
+        data: bytes,
+) -> tuple[str, bool, float | None] | dict[str, object]:
+    """
+    Parse a raw request.
+
+    Return ``(code, strict_json, timeout)`` on success, or a response dict on
+    error. Safe to call from the I/O thread (no Blender API is touched).
+    """
+
+    # Invalid JSON is not expected since the MCP server serializes requests with `json.dumps`.
+    # Any error should be rare, the "default" exception path is fine.
+    try:
+        request = json.loads(data)
+    except Exception:  # pylint: disable=broad-exception-caught
+        return {"status": "error", "message": traceback.format_exc()}
+
+    if request.get("type") != "execute":
+        return {
+            "status": "error",
+            "message": "Unknown request type: {!r}".format(request.get("type")),
+        }
+    code = request.get("code", "")
+    if not isinstance(code, str):
+        return {"status": "error", "message": "The 'code' value must be a string"}
+
+    # Not expected in normal use, but a clear message beats a cryptic trace-back,
+    # Also make it clear where the error should be addressed.
+    strict_json = request.get("strict_json")
+    if not isinstance(strict_json, bool):
+        return {
+            "status": "error",
+            "message": (
+                "Internal error: a blender_mcp tool sent a request without the required 'strict_json' boolean key. "
+                "This is a bug in the tool that generated this code"
+            ),
+        }
+
+    request_timeout = request.get("execution_timeout_s")
+    if (
+        isinstance(request_timeout, bool)
+        or not isinstance(request_timeout, (int, float))
+        or request_timeout <= 0.0
+    ):
+        request_timeout = None
+    return code, strict_json, request_timeout
+
+
+def _execute_request(
+        code: str,
+        strict_json: bool,
+        timeout: float | None = None,
+) -> _ExecResult:
+    """Execute a parsed request and log it when ``use_log`` is enabled."""
+    if use_log:
+        print("request:\n{:s}".format(code), file=sys.stderr)
+    exec_result = _execute_code(code, strict_json=strict_json, timeout=timeout)
+    if use_log:
+        if exec_result.check_fn is not None:
+            print("response: deferred", file=sys.stderr)
+        else:
+            print("response: {:s}".format(json.dumps(exec_result.response, indent=2)), file=sys.stderr)
+    return exec_result
+
+
 def _execute_code_from_request(
         data: bytes,
 ) -> tuple[_ExecResult, bool]:
@@ -290,49 +443,11 @@ def _execute_code_from_request(
 
     Return ``(exec_result, strict_json)``.
     """
-
-    # NOTE: This function is not expected to raise exceptions because we control the MCP server, tool-code and add-on.
-    # If there is an error, it will be handled by the caller (the LLM will get the stack trace).
-    #
-    # Even so, if a tool is misbehaving, or a change in the code causes an error,
-    # give a "helpful" response - to avoid the hassles of searching about for the root cause.
-
-    # Invalid JSON is not expected since the MCP server serializes requests with `json.dumps`.
-    # Any error should be rare, the "default" exception path is fine.
-    request = json.loads(data)
-
-    if request.get("type") != "execute":
-        return _ExecResult({
-            "status": "error",
-            "message": "Unknown request type: {!r}".format(request.get("type")),
-        }), False
-    code = request.get("code", "")
-
-    # Not expected in normal use, but a clear message beats a cryptic trace-back,
-    # Also make it clear where the error should be addressed.
-    strict_json = request.get("strict_json")
-    if not isinstance(strict_json, bool):
-        return (
-            _ExecResult({
-                "status": "error",
-                "message": (
-                    "Internal error: a blender_mcp tool sent a request without the required 'strict_json' boolean key. "
-                    "This is a bug in the tool that generated this code"
-                ),
-            }),
-            False,
-        )
-
-    if use_log:
-        print("request:\n{:s}".format(code), file=sys.stderr)
-    exec_result = _execute_code(code, strict_json=strict_json)
-    if use_log:
-        if exec_result.check_fn is not None:
-            print("response: deferred", file=sys.stderr)
-        else:
-            print("response: {:s}".format(json.dumps(exec_result.response, indent=2)), file=sys.stderr)
-
-    return exec_result, strict_json
+    parsed = _parse_request(data)
+    if isinstance(parsed, dict):
+        return _ExecResult(parsed), False
+    code, strict_json, timeout = parsed
+    return _execute_request(code, strict_json, timeout), strict_json
 
 
 def _close_client(client: _Client) -> None:
@@ -459,14 +574,297 @@ def _service_clients() -> bool:
     return did_work
 
 
+# ---------------------------------------------------------------------------
+# Interactive mode: socket I/O runs on a background thread, Blender's main
+# thread only executes queued code under a per-tick time budget.
+
+class _IOClient:
+    """A connection owned by the I/O thread while its request is incomplete."""
+
+    __slots__ = (
+        "conn",
+        "buffer",
+        "deadline",
+    )
+
+    def __init__(self, conn: socket.socket) -> None:
+        self.conn: socket.socket = conn
+        self.buffer: bytearray = bytearray()
+        self.deadline: float = time.monotonic() + _CLIENT_TIMEOUT
+
+
+class _IOState:
+    """State shared between the main thread and the socket I/O thread."""
+
+    __slots__ = (
+        "sock",
+        "thread",
+        "stop",
+        "clients",
+        "requests",
+        "writes",
+        "pending_writes",
+    )
+
+    def __init__(self, sock: socket.socket) -> None:
+        self.sock: socket.socket = sock
+        self.thread: threading.Thread | None = None
+        self.stop = threading.Event()
+        # Connections whose request is still being received.
+        self.clients: dict[socket.socket, _IOClient] = {}
+        # Complete requests waiting for main-thread execution.
+        self.requests: queue.Queue = queue.Queue(maxsize=_REQUEST_QUEUE_MAX)
+        # Responses waiting to be written, produced by the main thread.
+        self.writes: queue.Queue = queue.Queue()
+        # Responses currently being written (partial sends included).
+        self.pending_writes: dict[socket.socket, list[object]] = {}
+
+
+_io_state: _IOState | None = None
+
+
+def _io_close_conn(conn: socket.socket) -> None:
+    try:
+        conn.close()
+    except Exception:  # pylint: disable=broad-exception-caught
+        pass
+
+
+def _queue_response(conn: socket.socket, data: bytes, close: bool) -> None:
+    """
+    Send a response without blocking Blender's main thread.
+
+    Interactive mode hands the socket back to the I/O thread. Background mode
+    and shutdown fall back to a bounded blocking send.
+    """
+    state = _io_state
+    if state is not None and state.thread is not None:
+        try:
+            state.writes.put_nowait((conn, bytes(data), close))
+        except Exception:  # pylint: disable=broad-exception-caught
+            _io_close_conn(conn)
+        return
+    try:
+        conn.settimeout(5.0)
+        conn.sendall(data)
+    except OSError:
+        pass
+    if close:
+        _io_close_conn(conn)
+
+
+def _io_drain_write_queue(state: _IOState) -> None:
+    while True:
+        try:
+            conn, data, close = state.writes.get_nowait()
+        except queue.Empty:
+            break
+        entry = state.pending_writes.get(conn)
+        if entry is None:
+            state.pending_writes[conn] = [bytearray(data), close]
+        else:
+            entry[0].extend(data)  # type: ignore[union-attr]
+            entry[1] = bool(entry[1]) or close
+
+
+def _io_flush_pending(state: _IOState, conn: socket.socket) -> None:
+    entry = state.pending_writes.get(conn)
+    if entry is None:
+        return
+    buf: bytearray = entry[0]  # type: ignore[assignment]
+    try:
+        sent = conn.send(buf)
+    except (BlockingIOError, InterruptedError):
+        return
+    except OSError:
+        state.pending_writes.pop(conn, None)
+        _io_close_conn(conn)
+        return
+    if sent:
+        del buf[:sent]
+    if not buf:
+        state.pending_writes.pop(conn, None)
+        if entry[1]:
+            _io_close_conn(conn)
+
+
+def _io_accept(state: _IOState) -> None:
+    accepted = 0
+    while accepted < _ACCEPT_BATCH:
+        try:
+            conn, _addr = state.sock.accept()
+        except BlockingIOError:
+            break
+        except OSError:
+            break
+        accepted += 1
+        conn.setblocking(False)
+        if len(state.clients) >= _MAX_CLIENTS:
+            _io_queue_error(state, conn, "Bridge is busy: too many pending clients")
+            continue
+        state.clients[conn] = _IOClient(conn)
+
+
+def _io_queue_error(state: _IOState, conn: socket.socket, message: str) -> None:
+    state.pending_writes[conn] = [bytearray(_encode_response({
+        "status": "error",
+        "message": message,
+    })), True]
+
+
+def _io_expire_clients(state: _IOState) -> None:
+    now = time.monotonic()
+    for conn, client in list(state.clients.items()):
+        if now > client.deadline:
+            state.clients.pop(conn, None)
+            _io_queue_error(state, conn, "Client timed out")
+
+
+def _io_read_client(state: _IOState, client: _IOClient) -> None:
+    conn = client.conn
+    try:
+        chunk = conn.recv(_RECV_BUFFER_SIZE)
+    except BlockingIOError:
+        return
+    except OSError:
+        state.clients.pop(conn, None)
+        _io_close_conn(conn)
+        return
+
+    if not chunk:
+        state.clients.pop(conn, None)
+        _io_close_conn(conn)
+        return
+
+    client.buffer.extend(chunk)
+    if len(client.buffer) > _MAX_REQUEST_BYTES:
+        state.clients.pop(conn, None)
+        _io_queue_error(state, conn, "Request exceeds {:d} byte limit".format(_MAX_REQUEST_BYTES))
+        return
+    if b"\0" not in client.buffer:
+        return
+
+    request_data = bytes(client.buffer[:client.buffer.index(b"\0")])
+    # Hand ownership to the main thread: stop reading this connection.
+    state.clients.pop(conn, None)
+
+    parsed = _parse_request(request_data)
+    if isinstance(parsed, dict):
+        state.pending_writes[conn] = [bytearray(_encode_response(parsed)), True]
+        return
+    code, strict_json, timeout = parsed
+    try:
+        state.requests.put_nowait((conn, code, strict_json, timeout))
+    except queue.Full:
+        _io_queue_error(state, conn, "Bridge is busy; retry shortly")
+
+
+def _io_thread_main(state: _IOState) -> None:
+    try:
+        while not state.stop.is_set():
+            _io_drain_write_queue(state)
+            read_list: list[socket.socket] = [state.sock]
+            read_list.extend(state.clients.keys())
+            # Pending write sockets are not read: the client is done sending.
+            write_list = list(state.pending_writes.keys())
+            try:
+                readable, writable, _errored = select.select(
+                    read_list, write_list, [], _IO_SELECT_TIMEOUT,
+                )
+            except (OSError, ValueError):
+                if state.stop.is_set():
+                    break
+                client_count = len(state.clients)
+                if client_count == 0 and not state.pending_writes:
+                    time.sleep(0.05)
+                continue
+
+            for conn in writable:
+                _io_flush_pending(state, conn)
+
+            if state.sock in readable:
+                _io_accept(state)
+
+            for conn in readable:
+                if conn is state.sock:
+                    continue
+                client = state.clients.get(conn)
+                if client is not None:
+                    _io_read_client(state, client)
+
+            _io_expire_clients(state)
+    finally:
+        try:
+            state.sock.close()
+        except Exception:  # pylint: disable=broad-exception-caught
+            pass
+        for conn in list(state.clients):
+            _io_close_conn(conn)
+        state.clients.clear()
+        for conn in list(state.pending_writes):
+            _io_close_conn(conn)
+        state.pending_writes.clear()
+        while True:
+            try:
+                conn, _code, _strict_json, _timeout = state.requests.get_nowait()
+            except queue.Empty:
+                break
+            _io_close_conn(conn)
+
+
+def _conn_is_closed(conn: socket.socket) -> bool:
+    """Best-effort check for a client that disconnected while queued."""
+    try:
+        return conn.recv(1, socket.MSG_PEEK) == b""
+    except BlockingIOError:
+        return False
+    except OSError:
+        return True
+
+
 def poll() -> bool:
     """
-    Non-blocking poll: accept new connections, service existing clients,
-    and check deferred responses.
+    Non-blocking poll: drain queued requests, execute them with a bounded
+    main-thread budget and check deferred responses.
 
-    Return ``True`` if work was done or deferred clients are pending.
+    Return ``True`` if work was done or deferred/queued work remains.
     """
     from . import deferred_tool
+
+    state = _io_state
+    if state is not None and state.thread is not None:
+        did_work = False
+        deadline = time.monotonic() + _SERVICE_BUDGET
+        while True:
+            try:
+                conn, code, strict_json, timeout = state.requests.get_nowait()
+            except queue.Empty:
+                break
+            if _conn_is_closed(conn):
+                _io_close_conn(conn)
+                did_work = True
+                continue
+            exec_result = _execute_request(code, strict_json, timeout)
+            if exec_result.check_fn is not None:
+                deferred_tool.add(
+                    conn,
+                    exec_result.check_fn,
+                    strict_json,
+                    str(exec_result.response.get("stdout", "")),
+                    str(exec_result.response.get("stderr", "")),
+                )
+            else:
+                _queue_response(conn, _encode_response(exec_result.response), True)
+            did_work = True
+            if time.monotonic() >= deadline:
+                break
+
+        if deferred_tool.poll():
+            did_work = True
+        if deferred_tool.has_pending() or not state.requests.empty():
+            did_work = True
+        return did_work
+
     _accept_clients()
     did_work = _service_clients()
     if deferred_tool.poll():
@@ -562,12 +960,17 @@ def start(host: str, port: int) -> None:
     called periodically (see ``execute_interactive`` and
     ``execute_blocking``).
 
+    Interactive sessions run socket I/O on a background thread so connection
+    floods cannot stall Blender's main thread.
+
     Callers should catch ``Exception`` broadly rather than specific types,
     since failures may be:
     - ``RuntimeError``, e.g. server already running.
     - ``OSError``, e.g. address already in use.
     ...other exceptions that are difficult to predict exhaustively.
     """
+    global _io_state
+
     if is_running():
         raise RuntimeError("Server is already running")
 
@@ -583,12 +986,67 @@ def start(host: str, port: int) -> None:
 
     _state.sock = sock
 
+    # Background mode has no timers: keep the synchronous select loop.
+    if bpy.app.background:
+        return
+
+    state = _IOState(sock)
+    thread = threading.Thread(
+        target=_io_thread_main,
+        args=(state,),
+        name="MCP-Bridge-IO",
+        daemon=True,
+    )
+    state.thread = thread
+    _io_state = state
+    try:
+        thread.start()
+    except Exception:  # pylint: disable=broad-exception-caught
+        _io_state = None
+        _state.sock = None
+        sock.close()
+        raise
+
 
 def stop() -> None:
     """
     Close the listening socket, all client connections, and deferred responses.
     """
+    global _io_state
+
     from . import deferred_tool
+
+    state = _io_state
+    if state is not None:
+        _io_state = None
+        state.stop.set()
+        try:
+            state.sock.close()
+        except Exception:  # pylint: disable=broad-exception-caught
+            pass
+        thread = state.thread
+        if (
+            thread is not None
+            and thread.is_alive()
+            and thread is not threading.current_thread()
+        ):
+            thread.join(timeout=2.0)
+        # The thread normally closes these; close any survivors defensively.
+        for conn in list(state.clients):
+            _io_close_conn(conn)
+        state.clients.clear()
+        for conn in list(state.pending_writes):
+            _io_close_conn(conn)
+        state.pending_writes.clear()
+        while True:
+            try:
+                conn, _code, _strict_json, _timeout = state.requests.get_nowait()
+            except queue.Empty:
+                break
+            _io_close_conn(conn)
+        _state.sock = None
+        deferred_tool.close_all()
+        return
 
     sock = _state.sock
     _state.sock = None

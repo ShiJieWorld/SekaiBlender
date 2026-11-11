@@ -23,6 +23,7 @@
 
 #include "DEG_depsgraph_query.hh"
 
+#include "DNA_camera_types.h"
 #include "DNA_lightprobe_types.h"
 #include "DNA_modifier_types.h"
 
@@ -86,10 +87,16 @@ void Instance::init()
     if (rv3d && (rv3d->persp == RV3D_CAMOB)) {
       camera = v3d->camera;
     }
+    /* Panoramic camera need the full film, none of the border resize below apply.
+     * TODO: passepartout crop is unsupported for panoramic camera.
+     * Could reuse the uv_scale/uv_bias remap already used for camera shift (see Camera::sync). */
+    const bool is_panoramic_camera =
+        camera && camera->type == OB_CAMERA &&
+        reinterpret_cast<const blender::Camera *>(camera->data)->type == CAM_PANO;
 
     if (draw_ctx->is_viewport_image_render() || draw_ctx->is_viewport_xr()) {
       if (camera) {
-        if (scene->r.mode & R_BORDER) {
+        if (!is_panoramic_camera && (scene->r.mode & R_BORDER)) {
           rect.xmin = scene->r.border.xmin * size[0];
           rect.ymin = scene->r.border.ymin * size[1];
           rect.xmax = scene->r.border.xmax * size[0];
@@ -105,17 +112,18 @@ void Instance::init()
     }
     else {
       rctf border;
-      if (rv3d && BKE_camera_view_render_border(
-                      scene, depsgraph, v3d, rv3d, size[0], size[1], &border, nullptr))
+      if (rv3d && !is_panoramic_camera &&
+          BKE_camera_view_render_border(
+              scene, depsgraph, v3d, rv3d, size[0], size[1], &border, nullptr))
       {
         BLI_rcti_rctf_copy_floor(&rect, &border);
-        /* Clamp it to the viewport area. */
-        rect.xmin = max(rect.xmin, 0);
-        rect.ymin = max(rect.ymin, 0);
-        rect.xmax = min(rect.xmax, size.x);
-        rect.ymax = min(rect.ymax, size.y);
       }
     }
+    /* Clamp it to the viewport area. */
+    rect.xmin = max(rect.xmin, 0);
+    rect.ymin = max(rect.ymin, 0);
+    rect.xmax = min(rect.xmax, size.x);
+    rect.ymax = min(rect.ymax, size.y);
 
     if (draw_ctx->is_viewport_image_render() || draw_ctx->is_viewport_xr()) {
       const float2 vp_size = draw_ctx->viewport_size_get();
@@ -169,8 +177,7 @@ void Instance::init(const int2 &output_res,
     if (depsgraph_last_update_ != DEG_get_update_count(depsgraph)) {
       sampling.reset();
     }
-    if (assign_if_different(is_viewport_compositor_enabled,
-                            draw_ctx->is_viewport_compositor_enabled()))
+    if (assign_if_different(is_viewport_compositor_used, draw_ctx->is_viewport_compositor_used()))
     {
       sampling.reset();
     }
@@ -762,7 +769,7 @@ void Instance::draw_viewport()
   render_sample();
   velocity.step_swap();
 
-  if (is_viewport_compositor_enabled) {
+  if (is_viewport_compositor_used) {
     this->film.write_viewport_compositor_passes();
   }
 
@@ -812,7 +819,7 @@ void Instance::draw_viewport_image_render()
   } while (!sampling.finished_viewport());
   velocity.step_swap();
 
-  if (is_viewport_compositor_enabled) {
+  if (is_viewport_compositor_used) {
     this->film.write_viewport_compositor_passes();
   }
 }

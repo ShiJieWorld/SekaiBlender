@@ -450,7 +450,7 @@ static PointerRNA rna_RenderEngine_render_get(PointerRNA *ptr)
 
     return RNA_pointer_create_with_parent(*ptr, RNA_RenderSettings, r);
   }
-  return PointerRNA_NULL;
+  return {};
 }
 
 static PointerRNA rna_RenderEngine_camera_override_get(PointerRNA *ptr)
@@ -1036,6 +1036,14 @@ static void rna_def_render_engine(BlenderRNA *brna)
   RNA_def_property_boolean_sdna(prop, nullptr, "type->flag", RE_USE_STEREO_VIEWPORT);
   RNA_def_property_flag(prop, PROP_REGISTER_OPTIONAL);
   RNA_def_property_ui_text(prop, "Use Stereo Viewport", "Support rendering stereo 3D viewport");
+
+  prop = RNA_def_property(srna, "bl_write_viewport_depth", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, nullptr, "type->flag", RE_WRITE_VIEWPORT_DEPTH);
+  RNA_def_property_flag(prop, PROP_REGISTER_OPTIONAL);
+  RNA_def_property_ui_text(prop,
+                           "Write Viewport Depth",
+                           "The render engine writes depth to the viewport framebuffer "
+                           "which should be used as is instead of doing an internal depth pass");
 
   prop = RNA_def_property(srna, "bl_use_materialx", PROP_BOOLEAN, PROP_NONE);
   RNA_def_property_boolean_sdna(prop, nullptr, "type->flag", RE_USE_MATERIALX);

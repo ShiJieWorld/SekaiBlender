@@ -14,6 +14,10 @@ if(WITH_IO_PLY)
   add_subdirectory(ply)
 endif()
 
+if(WITH_IO_SPZ)
+  add_subdirectory(spz)
+endif()
+
 if(WITH_IO_STL)
   add_subdirectory(stl)
 endif()
@@ -38,4 +42,8 @@ endif()
 
 if(WITH_USD)
   add_subdirectory(usd)
+endif()
+
+if(WITH_OPENTIMELINEIO)
+  add_subdirectory(otio)
 endif()

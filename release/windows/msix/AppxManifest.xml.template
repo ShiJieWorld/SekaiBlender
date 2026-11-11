@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10" xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10" xmlns:uap2="http://schemas.microsoft.com/appx/manifest/uap/windows10/2" xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3" xmlns:uap4="http://schemas.microsoft.com/appx/manifest/uap/windows10/4" xmlns:uap6="http://schemas.microsoft.com/appx/manifest/uap/windows10/6" xmlns:uap7="http://schemas.microsoft.com/appx/manifest/uap/windows10/7" xmlns:uap8="http://schemas.microsoft.com/appx/manifest/uap/windows10/8" xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10" xmlns:mobile="http://schemas.microsoft.com/appx/manifest/mobile/windows10" xmlns:iot="http://schemas.microsoft.com/appx/manifest/iot/windows10" xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10" xmlns:desktop2="http://schemas.microsoft.com/appx/manifest/desktop/windows10/2" xmlns:desktop6="http://schemas.microsoft.com/appx/manifest/desktop/windows10/6" xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities" xmlns:rescap3="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities/3" xmlns:rescap6="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities/6" xmlns:com="http://schemas.microsoft.com/appx/manifest/com/windows10" xmlns:com2="http://schemas.microsoft.com/appx/manifest/com/windows10/2" xmlns:com3="http://schemas.microsoft.com/appx/manifest/com/windows10/3" IgnorableNamespaces="uap uap2 uap3 uap4 uap6 uap7 uap8 uap10 mobile iot desktop desktop2 desktop6 rescap rescap3 rescap6 com com2 com3">
-  <Identity Name="SekaiBlender.SekaiBlender[PACKAGETYPE]" Publisher="[PUBLISHER]" Version="1.0.0.0" ProcessorArchitecture="[ARCHITECTURE]" />
+  <Identity Name="SekaiBlender.SekaiBlender[PACKAGETYPE]" Publisher="[PUBLISHER]" Version="1.0.1.0" ProcessorArchitecture="[ARCHITECTURE]" />
   <Properties>
-    <DisplayName>SekaiBlender 1.0</DisplayName>
+    <DisplayName>SekaiBlender 1.0.1</DisplayName>
     <PublisherDisplayName>SekaiBlender</PublisherDisplayName>
-    <Description>SekaiBlender 1.0 is a free and open source 3D creation suite with MMD tools</Description>
+    <Description>SekaiBlender 1.0.1 is a free and open source 3D creation suite with MMD tools</Description>
     <Logo>Assets\StoreLogo.scale-100.png</Logo>
   </Properties>
   <Resources>
@@ -20,7 +20,7 @@
     <Application Id="SEKAIBLENDER" Executable="Blender\SekaiBlender-launcher.exe" EntryPoint="Windows.FullTrustApplication">
       <uap:VisualElements
           BackgroundColor="transparent"
-          DisplayName="SekaiBlender 1.0"
+          DisplayName="SekaiBlender 1.0.1"
           Square150x150Logo="Assets\Square150x150Logo.png"
           Square44x44Logo="Assets\Square44x44Logo.png"
           Description="SekaiBlender is a free and open source 3D creation suite with MMD tools"
@@ -29,7 +29,7 @@
             Wide310x150Logo="Assets\Wide310x150Logo.png"
             Square310x310Logo="Assets\Square310x310Logo.png"
             Square71x71Logo="Assets\Square71x71Logo.png"
-            ShortName="SekaiBlender 1.0"
+            ShortName="SekaiBlender 1.0.1"
         >
           <uap:ShowNameOnTiles>
               <uap:ShowOn Tile="square150x150Logo"/> <!-- Show app name on the 150x150 tile -->

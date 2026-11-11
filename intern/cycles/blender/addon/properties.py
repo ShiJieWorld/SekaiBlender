@@ -22,6 +22,8 @@ from bpy.app.translations import (
 
 from math import pi
 
+import warnings
+
 # enums
 
 from . import engine
@@ -150,7 +152,7 @@ enum_volume_sampling = (
      "Use equiangular sampling, best for volumes with low density with light inside or near the volume"),
     ('MULTIPLE_IMPORTANCE',
      "Multiple Importance",
-     "Combine distance and equi-angular sampling for volumes where neither method is ideal"),
+     "Combine distance and equiangular sampling for volumes where neither method is ideal"),
 )
 
 enum_volume_interpolation = (
@@ -278,6 +280,15 @@ def enum_openimagedenoise_denoiser(self, context):
     return []
 
 
+def enum_dlss_denoiser(self, context):
+    import _cycles
+    if _cycles.with_dlss and (not context or bool(
+            context.preferences.addons[__package__].preferences.get_devices_for_type('CUDA'))):
+        return [('DLSS', "DLSS",
+                 n_("Use NVIDIA DLSS Ray Reconstruction"), 8)]
+    return []
+
+
 def enum_optix_denoiser(self, context):
     if not context or bool(context.preferences.addons[__package__].preferences.get_devices_for_type('OPTIX')):
         return [('OPTIX', "OptiX", n_(
@@ -288,8 +299,9 @@ def enum_optix_denoiser(self, context):
 def enum_preview_denoiser(self, context):
     optix_items = enum_optix_denoiser(self, context)
     oidn_items = enum_openimagedenoise_denoiser(self, context)
+    dlss_items = enum_dlss_denoiser(self, context)
 
-    if len(optix_items) or len(oidn_items):
+    if len(optix_items) or len(oidn_items) or len(dlss_items):
         items = [
             ('AUTO',
              "Automatic",
@@ -301,6 +313,7 @@ def enum_preview_denoiser(self, context):
 
     items += optix_items
     items += oidn_items
+    items += dlss_items
     return items
 
 
@@ -346,6 +359,28 @@ enum_denoising_quality = (
      "High performance",
      3),
 )
+enum_denoising_upscale_quality = (
+    ('NONE',
+     "None",
+     "Highest quality without upscaling",
+     0),
+    ('QUALITY',
+     "Quality",
+     "Offers higher image quality than balanced mode",
+     1),
+    ('BALANCED',
+     "Balanced",
+     "Offers both optimized performance and image quality",
+     2),
+    ('PERFORMANCE',
+     "Performance",
+     "Offers a higher performance boost than balanced mode",
+     3),
+    ('ULTRA_PERFORMANCE',
+     "Ultra Performance",
+     "Offers the highest performance boost",
+     4),
+)
 
 enum_direct_light_sampling_type = (
     ('MULTIPLE_IMPORTANCE_SAMPLING',
@@ -379,9 +414,14 @@ def update_world(self, context):
     context.scene.world.update_tag()
 
 
-def update_pause(self, context):
-    if context.area:
-        context.area.tag_redraw()
+def set_transform_preview_pause(self, value, current_value, is_set):
+    warnings.warn(
+        "'CyclesRenderSettings.preview_pause' has no effect anymore and will "
+        "be removed in a future version, use RegionView3D.pause_render instead",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return value
 
 
 class CyclesRenderSettings(bpy.types.PropertyGroup):
@@ -401,9 +441,8 @@ class CyclesRenderSettings(bpy.types.PropertyGroup):
 
     preview_pause: BoolProperty(
         name="Pause Preview",
-        description="Pause all viewport preview renders",
-        default=False,
-        update=update_pause,
+        description="Deprecated, this has no effect anymore. Use RegionView3D.pause_render instead",
+        set_transform=set_transform_preview_pause,
     )
 
     use_denoising: BoolProperty(
@@ -483,6 +522,12 @@ class CyclesRenderSettings(bpy.types.PropertyGroup):
         name="Denoise Preview on GPU",
         description="Perform denoising on GPU devices configured in the system tab in the user preferences. This is significantly faster than on CPU, but requires additional GPU memory. When large scenes need more GPU memory, this option can be disabled",
         default=True,
+    )
+    preview_denoising_upscale_quality: EnumProperty(
+        name="Viewport Denoising Upscale Quality",
+        description="Overall upscale factor and denoising quality when using DLSS",
+        items=enum_denoising_upscale_quality,
+        default='BALANCED',
     )
 
     samples: IntProperty(
@@ -1589,6 +1634,12 @@ class CyclesRenderLayerSettings(bpy.types.PropertyGroup):
         default=False,
         update=update_render_passes,
     )
+    denoising_store_motion_passes: BoolProperty(
+        name="Store Denoising Motion Passes",
+        description="Store the denoising motion passes, for temporal denoisers",
+        default=False,
+        update=update_render_passes,
+    )
     denoising_pass_follow_reflections: BoolProperty(
         name="Denoising Pass Reflections",
         description="Follow reflections for the denoising feature passes",
@@ -1844,6 +1895,26 @@ class CyclesPreferences(bpy.types.AddonPreferences):
 
         return False
 
+    def has_dlss_gpu_devices(self):
+        compute_device_type = self.get_compute_device_type()
+
+        # We need non-CPU devices, used for rendering and supporting DLSS
+        if compute_device_type != 'NONE':
+            for device in self.get_device_list(compute_device_type):
+                device_type = device[1]
+                if device_type == 'CPU':
+                    continue
+
+                # Skip devices that do not meet the driver requirement.
+                if not device[8]:
+                    continue
+
+                has_device_dlss_support = device[9]
+                if has_device_dlss_support and self.find_existing_device_entry(device).use:
+                    return True
+
+        return False
+
     def has_optixdenoiser_gpu_devices(self):
         compute_device_type = self.get_compute_device_type()
 
@@ -1884,7 +1955,8 @@ class CyclesPreferences(bpy.types.AddonPreferences):
                 found_device = True
                 break
 
-        optix_minimum_driver_version = "535"
+        optix_minimum_driver_version = "580"
+        cuda_minimum_driver_version = "580"
         hip_minimum_adrenalin_driver_version = "24.9.1"
         hip_minimum_pro_driver_version = "24.Q4"
         hip_minimum_linux_driver_version = "24.30"
@@ -1899,6 +1971,8 @@ class CyclesPreferences(bpy.types.AddonPreferences):
             if device_type == 'CUDA':
                 compute_capability = "5.0"
                 col.label(text=rpt_("Requires NVIDIA GPU with compute capability %s") % compute_capability,
+                          icon='BLANK1', translate=False)
+                col.label(text=rpt_("and NVIDIA driver version %s or newer") % cuda_minimum_driver_version,
                           icon='BLANK1', translate=False)
             elif device_type == 'OPTIX':
                 compute_capability = "5.0"
@@ -1962,7 +2036,7 @@ class CyclesPreferences(bpy.types.AddonPreferences):
                         translate=False)
                     col.label(text=rpt_("  - oneAPI Level-Zero Loader"), icon='BLANK1', translate=False)
             elif device_type == 'METAL':
-                mac_version = "12.2"
+                mac_version = "13.0"
                 col.label(text=rpt_("Requires Apple Silicon with macOS %s or newer") % mac_version,
                           icon='BLANK1', translate=False)
             return
@@ -1983,7 +2057,9 @@ class CyclesPreferences(bpy.types.AddonPreferences):
                 row.prop(device, "use", text=name, translate=False)
 
                 details = ""
-                if device.type == 'OPTIX':
+                if device.type == 'CUDA':
+                    details = rpt_("Requires NVIDIA driver version %s or newer") % cuda_minimum_driver_version
+                elif device.type == 'OPTIX':
                     details = rpt_("Requires NVIDIA driver version %s or newer") % optix_minimum_driver_version
                 elif device.type == 'HIP':
                     if sys.platform[:3] == "win":

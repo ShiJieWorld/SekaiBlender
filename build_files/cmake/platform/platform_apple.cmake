@@ -84,7 +84,7 @@ set(CMAKE_PREFIX_PATH ${LIB_SUBDIRS})
 # Find precompiled libraries, and avoid system or user-installed ones.
 
 if(EXISTS ${LIBDIR})
-  include(platform_old_libs_update)
+  include("${CMAKE_CURRENT_LIST_DIR}/platform_old_libs_update.cmake")
   without_system_libs_begin()
 endif()
 
@@ -174,6 +174,7 @@ if(WITH_CODEC_FFMPEG)
     vorbisfile vpx x264)
   # Frameworks required by libavfilter, using legacy macOS CGL
   string(APPEND PLATFORM_LINKFLAGS " -framework CoreImage -framework OpenGL")
+  string(APPEND PLATFORM_LINKFLAGS " -framework VideoToolbox -framework CoreMedia -framework CoreVideo")
   if(EXISTS ${LIBDIR}/ffmpeg/lib/libaom.a)
     list(APPEND FFMPEG_FIND_COMPONENTS aom)
   endif()
@@ -250,7 +251,7 @@ endif()
 find_package(OpenImageIO REQUIRED)
 add_bundled_libraries(openimageio/lib)
 
-find_package(OpenColorIO 2.0.0 REQUIRED CONFIG)
+find_package(OpenColorIO 2.3.0 REQUIRED CONFIG)
 add_bundled_libraries(opencolorio/lib)
 
 if(WITH_OPENVDB)
@@ -297,7 +298,7 @@ add_bundled_libraries(osl/lib)
 # OSL dependency
 add_bundled_libraries(openjph/lib)
 
-if(WITH_CYCLES AND WITH_CYCLES_EMBREE)
+if(WITH_EMBREE)
   find_package(Embree 4.0.0 REQUIRED)
 endif()
 add_bundled_libraries(embree/lib)
@@ -374,10 +375,24 @@ if(WITH_MESHOPTIMIZER)
 endif()
 add_bundled_libraries(meshoptimizer/lib)
 
+if(WITH_KTX)
+  find_package(Ktx REQUIRED CONFIG)
+endif()
+add_bundled_libraries(ktx/lib)
+
 if(WITH_TRACY)
-  set(Tracy_ROOT_DIR ${LIBDIR}/tracy)
   find_package(Tracy REQUIRED CONFIG)
 endif()
+
+if(WITH_JOLT)
+  find_package(Jolt REQUIRED CONFIG)
+endif()
+add_bundled_libraries(jolt/lib)
+
+if(WITH_OPENTIMELINEIO)
+  find_package(OpenTimelineIO REQUIRED CONFIG)
+endif()
+add_bundled_libraries(opentimelineio/lib)
 
 if(EXISTS ${LIBDIR})
   without_system_libs_end()
@@ -391,18 +406,16 @@ set(CMAKE_FIND_FRAMEWORK FIRST)
 
 set(EXETYPE MACOSX_BUNDLE)
 
-set(CMAKE_C_FLAGS_DEBUG "-g")
-set(CMAKE_CXX_FLAGS_DEBUG "-g")
-if(CMAKE_OSX_ARCHITECTURES MATCHES "x86_64" OR CMAKE_OSX_ARCHITECTURES MATCHES "i386")
-  set(CMAKE_CXX_FLAGS_RELEASE "-O2 -mdynamic-no-pic -msse -msse2 -msse3 -mssse3")
-  set(CMAKE_C_FLAGS_RELEASE "-O2 -mdynamic-no-pic  -msse -msse2 -msse3 -mssse3")
+string(APPEND CMAKE_C_FLAGS_RELEASE " -mdynamic-no-pic")
+string(APPEND CMAKE_CXX_FLAGS_RELEASE " -mdynamic-no-pic")
+
+if(CMAKE_OSX_ARCHITECTURES MATCHES "x86_64")
+  string(APPEND CMAKE_CXX_FLAGS_RELEASE " -msse -msse2 -msse3 -mssse3")
+  string(APPEND CMAKE_C_FLAGS_RELEASE " -msse -msse2 -msse3 -mssse3")
   if(NOT CMAKE_C_COMPILER_ID MATCHES "Clang")
     string(APPEND CMAKE_C_FLAGS_RELEASE " -ftree-vectorize  -fvariable-expansion-in-unroller")
     string(APPEND CMAKE_CXX_FLAGS_RELEASE " -ftree-vectorize  -fvariable-expansion-in-unroller")
   endif()
-else()
-  set(CMAKE_C_FLAGS_RELEASE "-O2 -mdynamic-no-pic")
-  set(CMAKE_CXX_FLAGS_RELEASE "-O2 -mdynamic-no-pic")
 endif()
 
 # Clang has too low template depth of 128 for libmv.

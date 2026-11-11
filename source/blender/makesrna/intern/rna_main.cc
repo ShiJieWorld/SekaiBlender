@@ -10,7 +10,6 @@
 #include <cstring>
 
 #include "BLI_path_utils.hh"
-
 #include "BLI_string_ref.hh"
 
 #include "BLT_translation.hh"
@@ -20,9 +19,42 @@
 
 #include "rna_internal.hh"
 
-#ifdef RNA_RUNTIME
+#include "IMB_colormanagement.hh"
 
-#  include "IMB_colormanagement.hh"
+namespace blender {
+
+static const EnumPropertyItem rna_enum_ocio_config_source_items[] = {
+    {int(ColorManagedConfigSource::EnvBlenderOCIO),
+     "BLENDER_OCIO",
+     0,
+     "BLENDER_OCIO environment variable",
+     "The BLENDER_OCIO environment variable"},
+    {int(ColorManagedConfigSource::EnvOCIO),
+     "OCIO",
+     0,
+     "OCIO environment variable",
+     "The OCIO environment variable"},
+    {int(ColorManagedConfigSource::Project),
+     "PROJECT",
+     0,
+     "Project",
+     "The active project's OpenColorIO configuration setting"},
+    {int(ColorManagedConfigSource::Blender),
+     "BLENDER",
+     0,
+     "Blender",
+     "The OpenColorIO configuration bundled with Blender"},
+    {int(ColorManagedConfigSource::Fallback),
+     "FALLBACK",
+     0,
+     "Fallback",
+     "The built-in fallback configuration, if loading other configurations failed"},
+    {0, nullptr, 0, nullptr, nullptr},
+};
+
+}  // namespace blender
+
+#ifdef RNA_RUNTIME
 
 #  include "DNA_windowmanager_types.h"
 
@@ -65,7 +97,7 @@ static bool rna_Main_is_dirty_get(PointerRNA *ptr)
   /* XXX, not totally nice to do it this way, should store in main ? */
   Main *bmain = static_cast<Main *>(ptr->data);
   wmWindowManager *wm;
-  if ((wm = static_cast<wmWindowManager *>(bmain->wm.first))) {
+  if ((wm = bmain->wm.first())) {
     return !wm->file_saved;
   }
 
@@ -96,6 +128,21 @@ static PointerRNA rna_Main_colorspace_get(PointerRNA *ptr)
 {
   Main *bmain = static_cast<Main *>(ptr->data);
   return PointerRNA(nullptr, RNA_BlendFileColorspace, &bmain->colorspace);
+}
+
+static void rna_MainColorspace_ocio_config_path_get(PointerRNA * /*ptr*/, char *value)
+{
+  strcpy(value, IMB_colormanagement_config_path_get().c_str());
+}
+
+static int rna_MainColorspace_ocio_config_path_length(PointerRNA * /*ptr*/)
+{
+  return IMB_colormanagement_config_path_get().size();
+}
+
+static int rna_MainColorspace_ocio_config_source_get(PointerRNA * /*ptr*/)
+{
+  return int(IMB_colormanagement_config_source_get());
 }
 
 static int rna_MainColorspace_working_space_get(PointerRNA *ptr)
@@ -142,6 +189,12 @@ static bool rna_MainColorspace_is_missing_opencolorio_config_get(PointerRNA *ptr
 {
   MainColorspace *colorspace = ptr->data_as<MainColorspace>();
   return colorspace->is_missing_opencolorio_config;
+}
+
+static bool rna_MainColorspace_is_failed_opencolorio_config_get(PointerRNA *ptr)
+{
+  MainColorspace *colorspace = ptr->data_as<MainColorspace>();
+  return colorspace->is_failed_opencolorio_config;
 }
 
 static PointerRNA rna_Main_blender_project_get(PointerRNA *ptr)
@@ -299,6 +352,7 @@ static void rna_def_main_colorspace(BlenderRNA *brna)
                            "Working Space",
                            "Color space used for all scene linear colors in this file, and "
                            "for compositing, shader and geometry nodes processing");
+  RNA_def_property_translation_context(prop, BLT_I18NCONTEXT_COLOR_MANAGEMENT);
   RNA_def_property_enum_funcs(prop,
                               "rna_MainColorspace_working_space_get",
                               nullptr,
@@ -324,6 +378,31 @@ static void rna_def_main_colorspace(BlenderRNA *brna)
                            "Missing OpenColorIO Configuration",
                            "A color space, view or display was not found, which likely means the "
                            "OpenColorIO config used to create this blend file is missing");
+
+  prop = RNA_def_property(srna, "is_failed_opencolorio_config", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_clear_flag(prop, PROP_EDITABLE);
+  RNA_def_property_boolean_funcs(
+      prop, "rna_MainColorspace_is_failed_opencolorio_config_get", nullptr);
+  RNA_def_property_ui_text(
+      prop, "Failed OpenColorIO Configuration", "The requested OpenColorIO config failed to load");
+
+  prop = RNA_def_property(srna, "ocio_config_path", PROP_STRING, PROP_FILEPATH);
+  RNA_def_property_string_maxlength(prop, FILE_MAX);
+  RNA_def_property_clear_flag(prop, PROP_EDITABLE);
+  RNA_def_property_string_funcs(prop,
+                                "rna_MainColorspace_ocio_config_path_get",
+                                "rna_MainColorspace_ocio_config_path_length",
+                                nullptr);
+  RNA_def_property_ui_text(prop,
+                           "OpenColorIO Configuration",
+                           "File path or URI of the OpenColorIO configuration currently in use");
+
+  prop = RNA_def_property(srna, "ocio_config_source", PROP_ENUM, PROP_NONE);
+  RNA_def_property_clear_flag(prop, PROP_EDITABLE);
+  RNA_def_property_enum_items(prop, rna_enum_ocio_config_source_items);
+  RNA_def_property_enum_funcs(prop, "rna_MainColorspace_ocio_config_source_get", nullptr, nullptr);
+  RNA_def_property_ui_text(
+      prop, "OpenColorIO Configuration Source", "Where the OpenColorIO configuration came from");
 }
 
 void RNA_def_main(BlenderRNA *brna)

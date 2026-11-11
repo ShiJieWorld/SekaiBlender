@@ -195,14 +195,13 @@ void BKE_blender_globals_init()
 {
   blender_version_init();
 
-  memset(&G, 0, sizeof(Global));
+  G = Global{};
 
   U.savetime = 1;
 
   BKE_blender_globals_main_replace(BKE_main_new());
 
   STRNCPY(G.filepath_last_image, "//");
-  G.filepath_last_blend[0] = '\0';
 
 #ifndef WITH_PYTHON_SECURITY /* default */
   G.f |= G_FLAG_SCRIPT_AUTOEXEC;
@@ -211,8 +210,6 @@ void BKE_blender_globals_init()
 #endif
 
   G.log.level = CLG_LEVEL_WARN;
-
-  G.profile_gpu = false;
 }
 
 void BKE_blender_globals_clear()
@@ -294,9 +291,7 @@ void BKE_blender_userdef_data_set_and_free(UserDef *userdef)
 
 static void userdef_free_keymaps(UserDef *userdef)
 {
-  for (wmKeyMap *km = static_cast<wmKeyMap *>(userdef->user_keymaps.first), *km_next; km;
-       km = km_next)
-  {
+  for (wmKeyMap *km = userdef->user_keymaps.first(), *km_next; km; km = km_next) {
     km_next = km->next;
     for (wmKeyMapDiffItem &kmdi : km->diff_items) {
       if (kmdi.add_item) {
@@ -323,9 +318,7 @@ static void userdef_free_keymaps(UserDef *userdef)
 
 static void userdef_free_keyconfig_prefs(UserDef *userdef)
 {
-  for (wmKeyConfigPref *kpt = static_cast<wmKeyConfigPref *>(userdef->user_keyconfig_prefs.first),
-                       *kpt_next;
-       kpt;
+  for (wmKeyConfigPref *kpt = userdef->user_keyconfig_prefs.first(), *kpt_next; kpt;
        kpt = kpt_next)
   {
     kpt_next = kpt->next;
@@ -337,9 +330,7 @@ static void userdef_free_keyconfig_prefs(UserDef *userdef)
 
 static void userdef_free_user_menus(UserDef *userdef)
 {
-  for (bUserMenu *um = static_cast<bUserMenu *>(userdef->user_menus.first), *um_next; um;
-       um = um_next)
-  {
+  for (bUserMenu *um = userdef->user_menus.first(), *um_next; um; um = um_next) {
     um_next = um->next;
     BKE_blender_user_menu_item_free_list(&um->items);
     MEM_delete(um);
@@ -348,9 +339,7 @@ static void userdef_free_user_menus(UserDef *userdef)
 
 static void userdef_free_addons(UserDef *userdef)
 {
-  for (bAddon *addon = static_cast<bAddon *>(userdef->addons.first), *addon_next; addon;
-       addon = addon_next)
-  {
+  for (bAddon *addon = userdef->addons.first(), *addon_next; addon; addon = addon_next) {
     addon_next = addon->next;
     BKE_addon_free(addon);
   }

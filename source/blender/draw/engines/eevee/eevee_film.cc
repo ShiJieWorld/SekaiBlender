@@ -74,7 +74,7 @@ void Film::init_aovs(const Set<std::string> &passes_used_by_viewport_compositor)
       }
     }
 
-    if (inst_.is_viewport_compositor_enabled) {
+    if (inst_.is_viewport_compositor_used) {
       for (ViewLayerAOV &aov : inst_.view_layer->aovs) {
         /* Already added as a display pass. No need to add again. */
         if (!aovs.is_empty() && aovs.last() == &aov) {
@@ -99,14 +99,24 @@ void Film::init_aovs(const Set<std::string> &passes_used_by_viewport_compositor)
     return;
   }
 
+  /* Pack color AOV hashes first, then value AOV hashes. Value hashes are placed after
+   * color hashes using the final color count as base, so the two must be packed in
+   * separate passes to avoid collisions when a value AOV precedes a color AOV. */
   for (ViewLayerAOV *aov : aovs) {
-    bool is_value = (aov->type == AOV_TYPE_VALUE);
-    int &index = is_value ? aovs_info.value_len : aovs_info.color_len;
-
-    /* Pack hash in `AOVsInfoData` uint4 array. We place value AOVs after color AOVs. */
-    int combined_index = is_value ? aovs_info.color_len + index : index;
+    if (aov->type == AOV_TYPE_VALUE) {
+      continue;
+    }
+    int &index = aovs_info.color_len;
+    aovs_info.hash[index / 4][index % 4] = BLI_hash_string(aov->name);
+    index++;
+  }
+  for (ViewLayerAOV *aov : aovs) {
+    if (aov->type == AOV_TYPE_COLOR) {
+      continue;
+    }
+    int &index = aovs_info.value_len;
+    int combined_index = aovs_info.color_len + index;
     aovs_info.hash[combined_index / 4][combined_index % 4] = BLI_hash_string(aov->name);
-
     index++;
   }
 
@@ -325,10 +335,14 @@ void Film::init(const int2 &extent, const rcti *output_rect)
 
   /* Compute the passes needed by the viewport compositor. */
   Set<std::string> passes_used_by_viewport_compositor;
-  if (inst_.is_viewport_compositor_enabled) {
-    passes_used_by_viewport_compositor = bke::compositor::get_used_passes(scene, inst_.view_layer);
+  if (inst_.is_viewport_compositor_used) {
+    passes_used_by_viewport_compositor = bke::compositor::get_used_passes(
+        scene, inst_.view_layer, bke::compositor::ExecutionMode::Preview);
     viewport_compositor_enabled_passes_ = get_viewport_compositor_enabled_passes(
         passes_used_by_viewport_compositor, inst_.view_layer);
+  }
+  else {
+    viewport_compositor_enabled_passes_ = eViewLayerEEVEEPassType(0);
   }
 
   enabled_categories_ = PassCategory(0);
@@ -439,6 +453,16 @@ void Film::init(const int2 &extent, const rcti *output_rect)
       data_.overscan = 0;
     }
 
+    if (inst_.camera.is_panoramic()) {
+      /* Reshape into a square so each face's pixel density stays close to the final film.
+       * TODO: Remove once per projection face clipping is implemented. */
+      int64_t render_pixel_count = data_.render_extent.x * int64_t(data_.render_extent.y);
+      render_extent_shading_view_ = int2(ceilf(sqrtf(float(render_pixel_count))));
+    }
+    else {
+      render_extent_shading_view_ = data_.render_extent;
+    }
+
     data_.filter_radius = clamp_f(scene.r.gauss, 0.0f, 100.0f);
     if (sampling.sample_count() == 1) {
       /* Disable filtering if sample count is 1. */
@@ -448,6 +472,10 @@ void Film::init(const int2 &extent, const rcti *output_rect)
       /* Fixes issue when using scaling factor and no filtering.
        * Without this, the filter becomes a dirac and samples gets only the fallback weight.
        * This results in a box blur instead of no filtering. */
+      data_.filter_radius = math::max(data_.filter_radius, 0.0001f);
+    }
+    if (inst_.camera.is_panoramic()) {
+      /* Avoid div by zero in the panoramic filter weights. */
       data_.filter_radius = math::max(data_.filter_radius, 0.0001f);
     }
 
@@ -642,14 +670,17 @@ void Film::sync()
    *
    * See #153463
    */
-  use_compute_ = !inst_.is_viewport() ||
+  /* The fragment shader path below is only safe to call once per frame, so force the
+   * compute path for panoramic to avoid a race between accumulate calls. */
+  use_compute_ = !inst_.is_viewport() || inst_.camera.is_panoramic() ||
                  GPU_type_matches(GPU_DEVICE_INTEL, GPU_OS_MAC, GPU_DRIVER_ANY) ||
                  GPU_type_matches_ex(
                      GPU_DEVICE_QUALCOMM, GPU_OS_WIN, GPU_DRIVER_ANY, GPU_BACKEND_VULKAN);
 
-  eShaderType shader = use_compute_ ? FILM_COMP : FILM_FRAG;
+  eShaderType shader = inst_.camera.is_panoramic() ? FILM_COMP_PANORAMIC :
+                                                     (use_compute_ ? FILM_COMP : FILM_FRAG);
 
-  /* TODO(fclem): Shader variation for panoramic & scaled resolution. */
+  /* TODO(fclem): Shader variation for scaled resolution. */
 
   gpu::Shader *sh = inst_.shaders.static_shader_get(shader);
   accumulate_ps_.init();
@@ -667,12 +698,13 @@ void Film::sync()
   copy_ps_.init();
   if (use_compute_ && inst_.is_viewport()) {
     init_pass(copy_ps_, inst_.shaders.static_shader_get(FILM_COPY));
+    copy_ps_.barrier(GPU_BARRIER_TEXTURE_FETCH | GPU_BARRIER_SHADER_IMAGE_ACCESS);
     copy_ps_.draw_procedural(GPU_PRIM_TRIS, 1, 3);
   }
 
   const int cryptomatte_layer_count = cryptomatte_layer_len_get();
   const bool is_cryptomatte_pass_enabled = cryptomatte_layer_count > 0;
-  const bool do_cryptomatte_sorting = !inst_.is_viewport() || inst_.is_viewport_compositor_enabled;
+  const bool do_cryptomatte_sorting = !inst_.is_viewport() || inst_.is_viewport_compositor_used;
   cryptomatte_post_ps_.init();
   if (is_cryptomatte_pass_enabled && do_cryptomatte_sorting) {
     cryptomatte_post_ps_.state_set(DRW_STATE_NO_DRAW);
@@ -713,7 +745,7 @@ void Film::init_pass(PassSimple &pass, gpu::Shader *sh)
   pass.bind_ubo("camera_curr", &(*velocity.camera_steps[STEP_CURRENT]));
   pass.bind_ubo("camera_next", &(*velocity.camera_steps[step_next]));
   pass.bind_texture("depth_tx", &rbuffers.depth_tx);
-  pass.bind_texture("combined_tx", &combined_final_tx_);
+  pass.bind_texture("combined_tx", &combined_final_tx_, filter);
   pass.bind_texture("vector_tx", &rbuffers.vector_tx);
   pass.bind_texture("rp_color_tx", &rbuffers.rp_color_tx);
   pass.bind_texture("rp_value_tx", &rbuffers.rp_value_tx);
@@ -736,7 +768,7 @@ void Film::init_pass(PassSimple &pass, gpu::Shader *sh)
 
 void Film::end_sync()
 {
-  use_reprojection_ = inst_.sampling.interactive_mode();
+  use_reprojection_ = inst_.sampling.interactive_mode() && !inst_.camera.is_panoramic();
 
   /* Just bypass the reprojection and reset the accumulation. */
   if (inst_.is_viewport() && !use_reprojection_ && inst_.sampling.is_reset()) {
@@ -833,7 +865,11 @@ void Film::update_sample_table()
   }
 
   data_.samples_len = 0;
-  if (data_.scaling_factor != 1) {
+  if (inst_.camera.is_panoramic()) {
+    /* Samples are jittered and weighted on the GPU (see `panoramic_sample_get`). */
+    data_.samples_len = FILM_PANORAMIC_SAMPLE_LEN;
+  }
+  else if (data_.scaling_factor != 1) {
     /* For this case there might be no valid samples for some pixels.
      * Still visit all four neighbors to have the best weight available.
      * Note that weight is computed on the GPU as it is different for each sample. */
@@ -977,10 +1013,12 @@ void Film::accumulate(View &view, gpu::Texture *combined_final_tx)
 
   display_only_ = false;
   inst_.manager->submit(accumulate_ps_, view);
-  inst_.manager->submit(copy_ps_, view);
 
   combined_tx_.swap();
   weight_tx_.swap();
+
+  /* copy_ps_ reads in_combined_tx so it must run after the swap. */
+  inst_.manager->submit(copy_ps_, view);
 
   /* Use history after first sample. */
   if (data_.use_history == 0) {
@@ -1004,7 +1042,7 @@ void Film::display()
   draw::View &drw_view = draw::View::default_get();
 
   display_only_ = true;
-  DRW_manager_get()->submit(accumulate_ps_, drw_view);
+  DRW_manager_get()->submit(use_compute_ ? copy_ps_ : accumulate_ps_, drw_view);
 
   inst_.render_buffers.release();
 

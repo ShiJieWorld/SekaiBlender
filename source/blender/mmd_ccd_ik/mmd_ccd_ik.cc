@@ -328,7 +328,7 @@ void mmd_ccd_ik_finalize_pose_deform(Object &armature_obj, const bool publish_to
     return;
   }
 
-  for (bPoseChannel *pchan = static_cast<bPoseChannel *>(armature_obj.pose->chanbase.first);
+  for (bPoseChannel *pchan = static_cast<bPoseChannel *>(armature_obj.pose->chanbase.first());
        pchan != nullptr;
        pchan = pchan->next)
   {
@@ -380,7 +380,7 @@ static void propagate_descendants_fk(Object &armature_obj,
                                      Bone &parent_bone,
                                      std::vector<bPoseChannel *> *r_modified_channels)
 {
-  for (Bone *bone = static_cast<Bone *>(parent_bone.childbase.first); bone != nullptr;
+  for (Bone *bone = static_cast<Bone *>(parent_bone.childbase.first()); bone != nullptr;
        bone = bone->next)
   {
     bPoseChannel *pchan = BKE_pose_channel_find_name(armature_obj.pose, bone->name);

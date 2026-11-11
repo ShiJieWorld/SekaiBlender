@@ -16,8 +16,8 @@
 
 #include "BKE_camera.h"
 #include "BKE_compositor.hh"
+#include "BKE_compute_context_cache.hh"
 #include "BKE_node.hh"
-#include "BKE_node_runtime.hh"
 
 #include "DEG_depsgraph_query.hh"
 
@@ -31,7 +31,7 @@
 #include "COM_node_group_operation.hh"
 #include "COM_realize_on_domain_operation.hh"
 #include "COM_result.hh"
-#include "COM_scheduler.hh"
+#include "COM_scene_compositor_effects_operation.hh"
 #include "COM_utilities.hh"
 
 #include "GPU_context.hh"
@@ -48,25 +48,20 @@ class Context : public compositor::Context {
  private:
   const Main *main_;
   const Scene *scene_;
-  /* A pointer to the info message of the compositor engine. This is a char array of size
-   * GPU_INFO_SIZE. The message is cleared prior to updating or evaluating the compositor. */
-  char *info_message_;
-  /* The hash of the active compute context. */
-  const ComputeContextHash active_compute_context_hash_;
+  /* The compute context of the active viewer if one exists. */
+  const ComputeContext *active_compute_context_;
 
  public:
   Context(compositor::StaticCacheManager &cache_manager,
+          bke::ComputeContextCache &compute_context_cache,
           const Main *main,
-          const Scene *scene,
-          char *info_message)
-      : compositor::Context(cache_manager),
+          const Scene *scene)
+      : compositor::Context(cache_manager, compute_context_cache),
         main_(main),
         scene_(scene),
-        info_message_(info_message),
-        active_compute_context_hash_(bke::compositor::compute_active_compute_context_hash(
-            *scene, *scene->compositing_node_group))
+        active_compute_context_(
+            bke::compositor::compute_viewer_compute_context(*scene, compute_context_cache))
   {
-    this->set_info_message("");
   }
 
   const Main &get_main() const override
@@ -84,9 +79,19 @@ class Context : public compositor::Context {
     return true;
   }
 
-  const ComputeContextHash &get_active_compute_context_hash() const override
+  bool is_viewport() const override
   {
-    return active_compute_context_hash_;
+    return true;
+  }
+
+  compositor::SideEffectOutputTypes needed_side_effect_output_types() const override
+  {
+    return compositor::SideEffectOutputTypes::ViewerNode;
+  }
+
+  const ComputeContext *viewer_compute_context() const override
+  {
+    return active_compute_context_;
   }
 
   /* In case the viewport has no camera region or is an image render, the domain covers the entire
@@ -322,84 +327,30 @@ class Context : public compositor::Context {
     return compositor::ResultPrecision::Half;
   }
 
-  void set_info_message(StringRef message) const override
-  {
-    message.copy_utf8_truncated(info_message_, GPU_INFO_SIZE);
-  }
-
-  compositor::NodeGroupOutputTypes needed_outputs() const
-  {
-    return compositor::NodeGroupOutputTypes::ViewerNode;
-  }
-
   void evaluate()
   {
-    using namespace compositor;
-    const NodeGroupOutputTypes needed_outputs = this->needed_outputs();
-    const bNodeTree &node_group = *DRW_context_get()->scene->compositing_node_group;
-    const bke::DataBlockComputeContext base_compute_context(nullptr, this->get_scene().id);
-    NodeGroupOperation node_group_operation(
-        *this, node_group, needed_outputs, base_compute_context);
+    compositor::SceneCompositorEffectsOperation operation =
+        compositor::SceneCompositorEffectsOperation(*this);
 
-    /* If the node group has no viewer node in the active context or the base context, and the
-     * context requires a viewer output, we use the group output as a viewer. */
-    const bool has_viewer =
-        has_viewer_node(node_group, base_compute_context, base_compute_context.hash()) ||
-        has_viewer_node(node_group, base_compute_context, this->get_active_compute_context_hash());
-    const bool needs_viewer_output = flag_is_set(needed_outputs, NodeGroupOutputTypes::ViewerNode);
-    const bool use_group_output_as_viewer = (!has_viewer && needs_viewer_output);
+    const int active_view_layer_index = BLI_findstringindex(
+        &scene_->view_layers, DRW_context_get()->view_layer->name, offsetof(ViewLayer, name));
+    compositor::Result combined_pass = this->get_pass(
+        scene_, active_view_layer_index, RE_PASSNAME_COMBINED);
+    operation.map_input_to_result(&combined_pass);
+    operation.evaluate();
 
-    const bool is_group_output_needed = use_group_output_as_viewer;
-
-    /* Set the reference count for the outputs, only the first color output is actually needed,
-     * while the rest are ignored. */
-    node_group.ensure_interface_cache();
-    for (const bNodeTreeInterfaceSocket *output_socket : node_group.interface_outputs()) {
-      const bool is_first_output = output_socket == node_group.interface_outputs().first();
-      Result &output_result = node_group_operation.get_result(output_socket->identifier);
-      const bool is_color = output_result.type() == ResultType::Color;
-      const bool is_needed = is_group_output_needed && is_first_output && is_color;
-      output_result.set_reference_count(is_needed ? 1 : 0);
+    if (!operation.has_output()) {
+      operation.free_results();
+      return;
     }
 
-    /* Map the inputs to the operation. */
-    Vector<std::unique_ptr<Result>> inputs;
-    for (const bNodeTreeInterfaceSocket *input_socket : node_group.interface_inputs()) {
-      Result *input_result = new Result(
-          this->create_result(ResultType::Color, ResultPrecision::Half));
-      if (input_socket == node_group.interface_inputs()[0]) {
-        /* First socket is the viewport combined pass. */
-        const int active_view_layer_index = BLI_findstringindex(
-            &scene_->view_layers, DRW_context_get()->view_layer->name, offsetof(ViewLayer, name));
-        Result combined_pass = this->get_pass(
-            scene_, active_view_layer_index, RE_PASSNAME_COMBINED);
-        input_result->share_data(combined_pass);
-        combined_pass.release();
-      }
-      else {
-        /* The rest of the sockets are not supported. */
-        input_result->allocate_invalid();
-      }
-
-      node_group_operation.map_input_to_result(input_socket->identifier, input_result);
-      inputs.append(std::unique_ptr<Result>(input_result));
+    /* If the no viewer output exist, write the output as a viewer. */
+    compositor::Result &output_result = operation.get_result();
+    if (!this->viewer_compute_context()) {
+      this->write_viewer(output_result);
     }
 
-    node_group_operation.evaluate();
-
-    /* Write the outputs of the operation. */
-    for (const bNodeTreeInterfaceSocket *output_socket : node_group.interface_outputs()) {
-      Result &output_result = node_group_operation.get_result(output_socket->identifier);
-      if (!output_result.should_compute()) {
-        continue;
-      }
-
-      if (use_group_output_as_viewer) {
-        this->write_viewer(output_result);
-      }
-
-      output_result.release();
-    }
+    output_result.release();
   }
 };
 
@@ -420,10 +371,11 @@ class Instance : public DrawEngine {
 
   void draw(Manager & /*manager*/) final
   {
+    bke::ComputeContextCache compute_context_cache;
     Context context(cache_manager_,
+                    compute_context_cache,
                     DEG_get_bmain(DRW_context_get()->depsgraph),
-                    DRW_context_get()->scene,
-                    this->info);
+                    DRW_context_get()->scene);
     if (context.get_camera_region().is_empty()) {
       return;
     }

@@ -8,17 +8,129 @@
 
 #pragma once
 
+#include "intern/blender_project_config.h"
+
 #include <concepts>
+#include <cstdint>
+#include <memory>
 #include <optional>
 
 #include "BLI_function_ref.hh"
 #include "BLI_string_ref.hh"
+#include "BLI_vector.hh"
+
+#include "DNA_ID.h"
+
+#include "BKE_idprop.hh"
+
+#define BLENDER_PROJECT_CONFIG_DIR ".blender_project"
+#define BLENDER_PROJECT_CONFIG_FILE "project.toml"
 
 namespace blender {
 
 struct Main;
 
 namespace bke {
+
+/**
+ * The main data type of a project variable.
+ *
+ * We intentionally re-use the values from `eIDPropertyType` to make translation
+ * between the two easy.
+ */
+enum class ProjectVariableType : char {
+  STRING = eIDPropertyType::IDP_STRING,
+  INT = eIDPropertyType::IDP_INT,
+  FLOAT = eIDPropertyType::IDP_FLOAT,
+};
+
+/**
+ * The subtype of a string project variable, indicating how the data should be
+ * interpreted.
+ *
+ * We intentionally re-use the values from `PropertySubType` to make translation
+ * between the two easy.
+ */
+enum class ProjectVariableStringSubtype {
+  /* These should be kept in sync with their counterparts in PropertySubType
+   * from RNA_types.hh. We don't include that header here because some places
+   * that include *this* header don't have access to it. */
+  NONE = 0,     /* PropertySubType::PROP_NONE */
+  FILEPATH = 1, /* PropertySubType::PROP_FILEPATH */
+};
+
+/**
+ * A variable in a project.
+ *
+ * A project variable is a named value (like a string or integer)
+ * that is shared across all blend files in a project.
+ */
+class ProjectVariable : IDProperty {
+ public:
+  ProjectVariable(StringRef name, ProjectVariableType type);
+
+  ~ProjectVariable();
+  ProjectVariable(const ProjectVariable &other) = delete;
+  ProjectVariable &operator=(const ProjectVariable &other) = delete;
+  ProjectVariable(ProjectVariable &&other) noexcept;
+  ProjectVariable &operator=(ProjectVariable &&other) noexcept;
+
+  /**
+   * Get the underlying ID property of the variable.
+   *
+   * NOTE: typically you shouldn't use this, especially outside of this source
+   * file.
+   *
+   * We inherit privately from `IDProperty` because we're only using a specific
+   * subset of what it does, and we don't want people accidentally putting it
+   * in invalid states for this type. This method bypasses those protections,
+   * and should only be used in narrow specific cases.
+   */
+  IDProperty &prop()
+  {
+    return *this;
+  }
+  const IDProperty &prop() const
+  {
+    return *this;
+  }
+
+  /**
+   * Get the variable's name.
+   *
+   * Note that renaming a variable requires access to project data (to ensure
+   * name uniqueness), and therefore variable renaming is done via
+   * `rename_variable()` on `Project` rather than by a method on the variable
+   * itself.
+   *
+   * \see Project::rename_variable()
+   */
+  StringRefNull name_get() const;
+
+  /**
+   * Get the variable's type.
+   *
+   * Note that the variable's type is determined at construction time,
+   * and cannot be changed after.
+   *
+   * \see Project::new_variable()
+   */
+  ProjectVariableType type_get() const;
+
+  ProjectVariableStringSubtype string_subtype_get() const;
+  void string_subtype_set(ProjectVariableStringSubtype type);
+
+  StringRefNull value_string_get() const;
+  int value_int_get() const;
+  float value_float_get() const;
+
+  void value_set(StringRefNull value);
+  void value_set(int value);
+  void value_set(float value);
+
+  StringRefNull description_get() const;
+  void description_set(StringRef description);
+};
 
 /**
  * A Blender project.
@@ -40,7 +152,22 @@ class BlenderProject {
    */
   std::string root_path_;
 
+  /**
+   * Path of the OpenColorIO configuration for this project.
+   */
+  std::string ocio_config_path_;
+
+  /**
+   * Path of the splash screen image for this project.
+   */
+  std::string splash_image_path_;
+
  public:
+  Vector<std::unique_ptr<ProjectVariable>> variables;
+  int active_variable_index = 0;
+  /* The index of the selected project asset library in the UI. */
+  int active_asset_library_index;
+
   /**
    * Whether the project has unsaved changes.
    *
@@ -48,6 +175,11 @@ class BlenderProject {
    * `BlenderProject` is unsaved by definition.
    */
   bool is_dirty = true;
+
+  /**
+   * Show the OpenColorIO config a path even when empty or a preset, runtime UI state only.
+   */
+  bool ocio_config_use_path = false;
 
   /**
    * Set the project's name.
@@ -67,8 +199,62 @@ class BlenderProject {
    */
   void set_root_path(StringRef root_path);
 
+  /**
+   * Set the OpenColorIO configuration path and mark the project dirty.
+   */
+  void set_ocio_config_path(StringRef ocio_config_path);
+
+  /**
+   * Set the splash screen image path and mark the project dirty.
+   */
+  void set_splash_image_path(StringRef splash_image_path);
+
   StringRefNull get_name() const;
   StringRefNull get_root_path() const;
+  StringRefNull get_ocio_config_path() const;
+  StringRefNull get_splash_image_path() const;
+
+  /**
+   * Get the array index of the given variable.
+   *
+   * \return If the variable is found, the index of the variable.  If not found, -1.
+   */
+  int find_variable_index(ProjectVariable *var);
+
+  /**
+   * Create a new variable of the given name and type.
+   *
+   * If `name` does not adhere to naming requirements, it is automatically
+   * altered to meet them by substituting invalid characters. `name` will also
+   * be modified if needed to make it unique among the current variables.
+   */
+  ProjectVariable *new_variable(StringRef name, ProjectVariableType type);
+
+  /**
+   * Remove the given variable.
+   *
+   * \returns The index that the removed variable had, or -1 if the variable
+   * wasn't found.
+   */
+  int remove_variable(ProjectVariable *var);
+
+  /**
+   * Move the variable at from_index to to_index.
+   *
+   * The other variables are shifted appropriately around this.
+   *
+   * Both from_index and to_index must be valid indices in the list.
+   */
+  void move_variable(int from_index, int to_index);
+
+  /**
+   * Rename the variable at the given index.
+   *
+   * If `name` does not adhere to naming requirements, it is automatically
+   * altered to meet them by substituting invalid characters. `name` will also
+   * be modified if needed to make it unique among the current variables.
+   */
+  void rename_variable(int variable_index, StringRef name);
 };
 
 /**
@@ -95,7 +281,45 @@ void with_blender_project_read_lock(FunctionRef<void()> lambda);
  */
 void with_blender_project_write_lock(FunctionRef<void()> lambda);
 
+/**
+ * Return whether the given string is a valid project variable identifier or not.
+ *
+ * For the moment we are very restrictive: only alphanumeric characters and underscores are
+ * allowed, and the first character must not be a digit. This is very similar to the identifier
+ * rules in some programming languages.
+ *
+ * In the future we should likely expand this to allow more of unicode. But better to start
+ * restrictive and open up later than start super open and discover we need to make a breaking
+ * change by making it more restrictive.
+ */
+bool is_valid_project_variable_name(StringRef name);
+
+/**
+ * Turn the given string into a valid project variable name.
+ *
+ * This is accomplished via simple substitution of non-allowed characters.
+ *
+ * The resulting string will pass `is_valid_project_variable_name()` above.
+ *
+ * \see is_valid_project_variable_name()
+ *
+ * \returns The new valid variable name.
+ */
+std::string ensure_is_valid_project_variable_name(StringRef name);
+
 }  // namespace bke
+
+/**
+ * Checks if the provided path is inside of a blender project.
+ *
+ * Note that this function will not check if the project has a valid config.
+ *
+ * \param path: The file or folder to check if it belongs to a project or not.
+ *
+ * \returns The project root path as a string. If no project was found, it
+ * will return an empty string.
+ */
+std::string BKE_is_path_inside_blender_project(const char *path);
 
 /**
  * Fetch the current active Blender Project, if any.
@@ -206,11 +430,58 @@ inline auto BKE_blender_project_write_callback(const Main *bmain, Fn lambda)
  */
 bool BKE_blender_project_init(blender::StringRef name, blender::StringRef root_path);
 
+/** Refresh the current project if needed.
+ *
+ * Refreshes the current project if the provided filepath belongs to an
+ * other project (or no project at all).
+ */
+void BKE_blender_project_refresh(Main *bmain, const char *filepath);
+
 /**
  * Clears and unloads the current active project, if any.
  *
  * This handles thread synchronization internally.
  */
 void BKE_blender_project_clear();
+
+/**
+ * If a file path is inside the project directory, make it relative using {project_root}.
+ *
+ * \param path_is_template: True if #path is already in template form, or false if a
+ * regular file path that still needs escaping.
+ */
+std::string BKE_blender_project_path_make_relative(StringRef path,
+                                                   bool path_is_template,
+                                                   const bke::BlenderProject &project);
+
+/**
+ * Resolve path templates like {project_root} in a project setting file path.
+ *
+ * \return The absolute file path, or an empty string if the path is invalid or not absolute.
+ */
+std::string BKE_blender_project_path_resolve(StringRef path, const bke::BlenderProject &project);
+
+/** Saves changes to the active project config if autosave is enabled. */
+void BKE_blender_project_config_autosave(Main *bmain);
+/** Saves the active project config to disk. */
+bool BKE_blender_project_config_file_write(Main *bmain);
+/** Try to initialize a project from the provided project root path. */
+bool BKE_blender_project_init_from_root_path(Main *bmain, std::string project_root_path);
+
+/* Return whether the given path is a Blender Project or not. */
+bool BKE_blender_project_dir_is_project(StringRef path);
+
+/** Recent projects list item. */
+struct RecentProject {
+  std::string path;
+  std::string name;
+};
+
+/** Recently opened projects, most recent first. */
+Vector<RecentProject> BKE_blender_project_recent_get();
+/** Move the active project to the top of the recent projects. */
+void BKE_blender_project_recent_update(const Main *bmain);
+/** Clear the recent projects, or only the ones not found on disk. */
+void BKE_blender_project_recent_clear(bool only_missing);
 
 }  // namespace blender

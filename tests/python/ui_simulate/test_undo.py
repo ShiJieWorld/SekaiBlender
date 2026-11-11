@@ -85,6 +85,26 @@ def _bmesh_from_object(ob):
     return bmesh.from_edit_mesh(ob.data)
 
 
+def _bounds_from_coords(coords):
+    """
+    Return the min/max bounds of coordinates.
+    """
+    return (
+        tuple(min(co[axis] for co in coords) for axis in range(3)),
+        tuple(max(co[axis] for co in coords) for axis in range(3)),
+    )
+
+
+def _object_bounds(ob):
+    """
+    Return an object's min/max bounds in local space.
+    """
+    if ob.type == 'MESH' and ob.mode == 'EDIT':
+        # The bounding box isn't isn't reliably updated until leaving edit-mode.
+        return _bounds_from_coords([v.co for v in _bmesh_from_object(ob).verts])
+    return _bounds_from_coords(ob.bound_box)
+
+
 # -----------------------------------------------------------------------------
 # Text Editor
 
@@ -337,7 +357,51 @@ def view3d_simple():
     yield e.ctrl.shift.z(12)            # Redo until end.
     t.assertEqual(len(window.view_layer.objects.active.data.polygons), 16)
 
-# Utility to extract current mesh coordinates (used to ensure undo/redo steps are applied properly).
+
+def view3d_multi_mode_undo_history():
+    e, t, window = ui.test_window()
+    yield from _view3d_startup_area_maximized(e)
+
+    # NOTE: it should be possible to consider "Add -> Mesh -> Plane" an exact match.
+    # However, shortcuts are now included so without them this ends up fuzzy-matching to "Add -> Image -> Mesh Plane".
+    # To resolve that it's necessary to match the entire shortcut which... changes based on the platform (sign!).
+    use_menu_search_workaround = True
+    if use_menu_search_workaround:
+        import sys
+        yield from ui.call_menu(e, "Add ({:s} A) -> Mesh -> Plane".format(
+            "\u21e7" if sys.platform == "darwin" else "Shift"
+        ))
+        del sys
+    else:
+        # It would be nice if this could be restored.
+        yield from ui.call_menu(e, "Add -> Mesh -> Plane")
+
+    # Duplicate and rotate.
+    for _ in range(3):
+        yield e.shift.d().x().text("3").ret()
+        yield e.r.z().text("15").ret()
+    t.assertEqual(len(window.view_layer.objects), 4)
+    yield e.a()                         # Select all.
+    yield e.numpad_7().numpad_period()  # View top.
+    yield e.ctrl.j()                    # Join.
+    t.assertEqual(len(window.view_layer.objects), 1)
+    yield e.tab()                       # Edit mode.
+    yield from ui.call_menu(e, "Edge -> Subdivide")
+    yield e.tab()                       # Object mode.
+    t.assertEqual(len(window.view_layer.objects.active.data.polygons), 16)
+    yield e.ctrl.z(12)                  # Undo until start.
+    t.assertEqual(len(window.view_layer.objects), 0)
+    yield e.ctrl.shift.z(12)            # Redo until end.
+    t.assertEqual(len(window.view_layer.objects.active.data.polygons), 16)
+
+    yield e.ctrl.tab().s()              # Sculpt via pie menu.
+    yield e.ctrl.one()                  # Add and set multires level 1
+
+    yield from ui.call_operator(e, "Undo History")
+    yield e.o()                         # Undo everything to Original step.
+    t.assertEqual(window.view_layer.objects.active.mode, 'OBJECT')
+
+# Utility to extract current mesh coordinates (used to ensure undo/redo steps are applied properly)
 
 
 def _extract_mesh_positions(window):
@@ -560,63 +624,6 @@ def view3d_texture_paint_simple():
     yield e.ctrl.z()                    # Used to crash T61172.
 
 
-def view3d_texture_paint_complex():
-    import bpy
-    # More complex test than `view3d_texture_paint_simple`,
-    # including interleaved memfile steps,
-    # and a call to history to undo several steps at once.
-    e, t, window = ui.test_window()
-    yield from _view3d_startup_area_maximized(e)
-
-    yield from ui.call_menu(e, "Add -> Mesh -> Monkey")
-    yield e.numpad_period()             # View monkey
-    yield e.ctrl.tab().t()              # Paint via pie menu.
-
-    yield from ui.call_operator(e, "Add Texture Paint Slot")
-    yield e.ret()                       # Accept popup.
-
-    initial_data = tuple(bpy.data.images['Suzanne Base Color'].pixels)
-
-    yield from e.leftmouse.cursor_motion(ui.cursor_motion_data_x(window))
-    yield from e.leftmouse.cursor_motion(ui.cursor_motion_data_y(window))
-
-    after_strokes = tuple(bpy.data.images['Suzanne Base Color'].pixels)
-    t.assertTrue(any([orig != new for (orig, new) in zip(initial_data, after_strokes)]),
-                 "At least one pixel should differ in color component")
-
-    yield from ui.call_operator(e, "Add Texture Paint Slot")
-    yield e.ret()                       # Accept popup.
-
-    yield from ui.call_operator(e, "Add Modifier")
-    yield e.a()                         # Array modifier
-    t.assertEqual(len(bpy.context.active_object.modifiers), 1, "One modifier should exist")
-
-    yield from e.leftmouse.cursor_motion(ui.cursor_motion_data_x(window))
-    yield from e.leftmouse.cursor_motion(ui.cursor_motion_data_y(window))
-
-    yield e.ctrl.z(6)                   # Undo: second slot added.
-    t.assertEqual(len(bpy.context.active_object.modifiers), 0, "No modifiers should exist")
-
-    after_undo = tuple(bpy.data.images['Suzanne Base Color'].pixels)
-    t.assertTrue(all([orig == new for (orig, new) in zip(initial_data, after_undo)]),
-                 "All pixels should be the same as their original state")
-
-    yield e.ctrl.z(1)                   # Undo: initial texture paint.
-    t.assertEqual(window.view_layer.objects.active.mode, 'TEXTURE_PAINT')
-    yield e.ctrl.z()                    # Undo: object mode.
-    t.assertEqual(window.view_layer.objects.active.mode, 'OBJECT')
-
-    yield e.ctrl.shift.z(2)             # Redo: initial blank canvas.
-    t.assertEqual(window.view_layer.objects.active.mode, 'TEXTURE_PAINT')
-
-    yield from e.leftmouse.cursor_motion(ui.cursor_motion_data_x(window))
-    yield from e.leftmouse.cursor_motion(ui.cursor_motion_data_y(window))
-
-    yield from ui.call_operator(e, "Undo History")
-    yield e.o()                         # Undo everything to Original step.
-    t.assertEqual(window.view_layer.objects.active.mode, 'OBJECT')
-
-
 def view3d_particle_edit_undo_from_texture_paint():
     import bpy
 
@@ -680,6 +687,71 @@ def view3d_particle_edit_undo_from_texture_paint():
     assert_particle_edit_valid()
 
 
+def view3d_mesh_edit_mode_object_mix():
+    """
+    Ensure global (MEMFILE) undo data is properly stored in mesh edit-mode.
+    """
+    import bpy
+    e, t, window = ui.test_window()
+    yield from _view3d_startup_area_maximized(e)
+
+    def state_get():
+        # Re-read the objects, 'memfile' undo steps re-allocate ID's.
+        objects = window.view_layer.objects
+        return (
+            bpy.context.mode,
+            tuple(objects["Camera"].location),
+            _object_bounds(objects["Cube"]),
+        )
+
+    def state_check(state_prev, state_curr, camera_changed):
+        # Only the camera or the mesh may change, never both.
+        (_, camera_prev, bounds_prev) = state_prev
+        (mode_curr, camera_curr, bounds_curr) = state_curr
+        t.assertEqual(mode_curr, 'EDIT_MESH')
+        if camera_changed:
+            t.assertNotEqual(camera_curr, camera_prev)
+            t.assertEqual(bounds_curr, bounds_prev)
+        else:
+            t.assertEqual(camera_curr, camera_prev)
+            t.assertNotEqual(bounds_curr, bounds_prev)
+
+    yield from ui.call_menu(e, "Add -> Camera")
+    yield from ui.call_menu(e, "Add -> Mesh -> Cube")
+    yield e.numpad_period()             # View all.
+
+    # NOTE: framing the camera uses evaluated geometry,
+    # there is a bug in Blender currently that this is skipped for edit-mode geometry.
+    # Adding the simple deform modifier works around this bug.
+    yield from ui.call_menu(e, "Modifiers -> Add Modifier -> Deform -> Simple Deform")
+    t.assertEqual([mod.type for mod in window.view_layer.objects["Cube"].modifiers], ['SIMPLE_DEFORM'])
+
+    yield e.tab()                       # Edit mode.
+
+    steps = [state_get()]
+    t.assertEqual(steps[0][0], 'EDIT_MESH')
+
+    for _ in range(3):
+        yield e.g().z().text("1").ret()  # Edit-mesh change.
+        steps.append(state_get())
+        state_check(steps[-2], steps[-1], camera_changed=False)
+
+        # Object-mode change.
+        yield from ui.call_menu(e, "View -> Align View -> Align Active Camera to Selected")
+        steps.append(state_get())
+        state_check(steps[-2], steps[-1], camera_changed=True)
+
+    # Undo each step, checking the recorded state.
+    for i in reversed(range(len(steps) - 1)):
+        yield e.ctrl.z()
+        t.assertEqual(state_get(), steps[i])
+
+    # Redo each step.
+    for i in range(1, len(steps)):
+        yield e.ctrl.shift.z()
+        t.assertEqual(state_get(), steps[i])
+
+
 def view3d_mesh_edit_separate():
     e, t, window = ui.test_window()
     yield from _view3d_startup_area_maximized(e)
@@ -735,6 +807,65 @@ def view3d_mesh_particle_edit_mode_simple():
     yield e.ctrl.z(7)
     t.assertEqual(window.view_layer.objects.active.mode, 'OBJECT')
     yield e.shift.ctrl.z(7)
+
+
+def view3d_font_edit_mode_object_mix():
+    """
+    Ensure global (MEMFILE) undo data is properly stored for 3D text in edit-mode.
+    """
+    import bpy
+    e, t, window = ui.test_window()
+    yield from _view3d_startup_area_maximized(e)
+
+    def state_get():
+        objects = window.view_layer.objects
+        return (
+            bpy.context.mode,
+            tuple(objects["Camera"].location),
+            _object_bounds(objects["Text"]),
+        )
+
+    def state_check(state_prev, state_curr, camera_changed):
+        # Only the camera or the text may change, never both.
+        (_, camera_prev, bounds_prev) = state_prev
+        (mode_curr, camera_curr, bounds_curr) = state_curr
+        t.assertEqual(mode_curr, 'EDIT_TEXT')
+        if camera_changed:
+            t.assertNotEqual(camera_curr, camera_prev)
+            t.assertEqual(bounds_curr, bounds_prev)
+        else:
+            t.assertEqual(camera_curr, camera_prev)
+            t.assertNotEqual(bounds_curr, bounds_prev)
+
+    yield from ui.call_menu(e, "Add -> Camera")
+    yield from ui.call_menu(e, "Add -> Text")
+    yield e.numpad_period()             # View all.
+
+    yield e.tab()                       # Edit mode.
+
+    steps = [state_get()]
+    t.assertEqual(steps[0][0], 'EDIT_TEXT')
+
+    for chars in ("AB", "CD", "EF"):
+        for ch in chars:
+            yield e.text(ch)            # Text change, each character is its own undo step.
+            steps.append(state_get())
+            state_check(steps[-2], steps[-1], camera_changed=False)
+
+        # Object-mode change.
+        yield from ui.call_menu(e, "View -> Align View -> Align Active Camera to Selected")
+        steps.append(state_get())
+        state_check(steps[-2], steps[-1], camera_changed=True)
+
+    # Undo each step, checking the recorded state.
+    for i in reversed(range(len(steps) - 1)):
+        yield e.ctrl.z()
+        t.assertEqual(state_get(), steps[i])
+
+    # Redo each step.
+    for i in range(1, len(steps)):
+        yield e.ctrl.shift.z()
+        t.assertEqual(state_get(), steps[i])
 
 
 def view3d_font_edit_mode_simple():

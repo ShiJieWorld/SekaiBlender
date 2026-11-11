@@ -29,6 +29,7 @@
 #include "BLI_path_utils.hh"
 
 #include "BKE_anim_data.hh"
+#include "BKE_animsys.hh"
 #include "BKE_appdir.hh"
 #include "BKE_blender_copybuffer.hh"
 #include "BKE_blendfile.hh"
@@ -492,10 +493,10 @@ wmOperatorStatus sequencer_clipboard_paste_exec(bContext *C, wmOperator *op)
   }
   BKE_id_delete(bmain_dst, scene_src);
 
-  Strip *iseq_first = static_cast<Strip *>(nseqbase.first);
+  Strip *iseq_first = nseqbase.first();
   BLI_movelisttolist(ed_dst->current_strips(), &nseqbase);
   /* Restore "first" pointer as BLI_movelisttolist sets it to nullptr */
-  nseqbase.first = iseq_first;
+  nseqbase.first_ = iseq_first;
 
   int2 strip_mean_pos = {0, 0};
   int image_strip_count = 0;
@@ -505,7 +506,7 @@ wmOperatorStatus sequencer_clipboard_paste_exec(bContext *C, wmOperator *op)
     }
     /* Make sure, that pasted strips have unique names. This has to be done after
      * adding strips to seqbase, for lookup cache to work correctly. */
-    seq::ensure_unique_name(*bmain_dst, &istrip, scene_dst);
+    seq::ensure_unique_name(&istrip, scene_dst, {});
 
     if (region->regiontype == RGN_TYPE_PREVIEW && istrip.type != STRIP_TYPE_SOUND &&
         seq::must_render_strip(seq::query_all_strips(&nseqbase), &istrip))
@@ -520,6 +521,7 @@ wmOperatorStatus sequencer_clipboard_paste_exec(bContext *C, wmOperator *op)
     strip_mean_pos /= image_strip_count;
   }
 
+  VectorSet<Strip *> pasted_strips;
   for (Strip &istrip : nseqbase) {
     /* Place strips that generate an image at the mouse cursor. */
     if (region->regiontype == RGN_TYPE_PREVIEW && !RNA_boolean_get(op->ptr, "keep_offset") &&
@@ -536,10 +538,19 @@ wmOperatorStatus sequencer_clipboard_paste_exec(bContext *C, wmOperator *op)
     /* Translate after name has been changed, otherwise this will affect animdata of original
      * strip. */
     seq::transform_translate_strip(scene_dst, &istrip, ofs);
-    /* Ensure, that pasted strips don't overlap. */
-    if (seq::transform_test_overlap(scene_dst, ed_dst->current_strips(), &istrip)) {
-      seq::transform_seqbase_shuffle(ed_dst->current_strips(), &istrip, scene_dst);
-    }
+    pasted_strips.add(&istrip);
+  }
+
+  /* Ensure that pasted strips don't overlap. */
+  ScrArea *area = CTX_wm_area(C);
+  const bool use_sync_markers = ((area->spacedata.first_as<SpaceSeq>())->flag &
+                                 SEQ_MARKER_TRANS) != 0;
+  if (seq::tool_settings_overlap_mode_get(scene_dst) == SEQ_OVERLAP_SHUFFLE) {
+    seq::transform_shuffle_vertical(ed_dst->current_strips(), pasted_strips, scene_dst);
+  }
+  else {
+    seq::transform_handle_overlap(
+        scene_dst, ed_dst->current_strips(), pasted_strips, use_sync_markers);
   }
 
   seq::animation_restore_original(scene_dst, &animation_backup);

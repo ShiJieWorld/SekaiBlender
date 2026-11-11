@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "mcp"
-version = "1.0.0"
+version = "1.0.2"
 name = "Local AI Bridge"
 tagline = "Local TCP socket so AI agents can drive the open scene"
 maintainer = "Blender Lab"

@@ -1100,6 +1100,11 @@ static int walkApply(bContext *C, WalkInfo *walk, bool is_confirm)
     moffset[1] = -moffset[1];
   }
 
+  if (walk->rv3d->persp == RV3D_CAMOB && (walk->rv3d->rflag & RV3D_FLIP_X) != 0) {
+    moffset[0] = -moffset[0];
+    moffset[1] = -moffset[1];
+  }
+
   /* Update jump height. */
   if (walk->gravity_state != WALK_GRAVITY_STATE_JUMP) {
     walk->jump_height = WALK_JUMP_HEIGHT;
@@ -1225,22 +1230,13 @@ static int walkApply(bContext *C, WalkInfo *walk, bool is_confirm)
       }
 
       if (walk->zlock == WALK_AXISLOCK_STATE_ACTIVE) {
-        float upvec[3];
-        copy_v3_fl3(upvec, 1.0f, 0.0f, 0.0f);
-        mul_m3_v3(mat, upvec);
-
+        const float horizon_plane[3] = {0.0f, 0.0f, 1.0f};
+        const float factor = 5.0f * time_redraw_clamped * walk->zlock_momentum *
+                             WALK_ZUP_CORRECT_FAC;
         /* Make sure we have some Z rolling. */
-        if (fabsf(upvec[2]) > 0.00001f) {
-          float roll = upvec[2] * 5.0f;
-          /* Rotate the view about this axis. */
-          copy_v3_fl3(upvec, 0.0f, 0.0f, 1.0f);
-          mul_m3_v3(mat, upvec);
-          /* Rotate about the relative up vector. */
-          axis_angle_to_quat(tmp_quat,
-                             upvec,
-                             roll * time_redraw_clamped * walk->zlock_momentum *
-                                 WALK_ZUP_CORRECT_FAC);
-          mul_qt_qtqt(rv3d->viewquat, rv3d->viewquat, tmp_quat);
+        if (view3d_horizon_correct_quat_ease_out(rv3d->viewquat, horizon_plane, false, factor) !=
+            0.0f)
+        {
           changed_viewquat = true;
 
           walk->zlock_momentum += WALK_ZUP_CORRECT_ACCEL;

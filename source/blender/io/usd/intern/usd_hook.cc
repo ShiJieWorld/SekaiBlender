@@ -7,7 +7,6 @@
 #include "usd.hh"
 #include "usd_api_hook.hh"
 #include "usd_asset_utils.hh"
-#include "usd_hash_types.hh"
 #include "usd_hierarchy_iterator.hh"
 #include "usd_reader_prim.hh"
 #include "usd_reader_stage.hh"
@@ -318,7 +317,7 @@ void register_hook_converters()
   python::import("pxr.Usd");
   python::import("pxr.UsdShade");
 
-  /* Register converter from PoinerRNA to a PyObject*. */
+  /* Register converter from PointerRNA to a PyObject*. */
   python::to_python_converter<PointerRNA, PointerRNAToPython>();
 
   /* Register context class converters. */

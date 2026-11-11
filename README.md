@@ -25,7 +25,7 @@
 
 A prebuilt Windows x64 package is published on the [Releases](https://github.com/ShiJieWorld/SekaiBlender/releases/latest) page, so building from source is optional.
 
-1. Download `sekaiblender-1.0-git.<hash>-windows64.zip` (about 329 MB) from the latest release.
+1. Download `sekaiblender-1.0.1-git.<hash>-windows64.zip` (about 340 MB) from the latest release.
 2. Extract it anywhere. No installer and no administrator rights are required.
 3. Run `SekaiBlender-launcher.exe` from the extracted folder. Use `SekaiBlender.exe` directly if you want the console window attached.
 

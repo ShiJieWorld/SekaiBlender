@@ -15,8 +15,14 @@
  *     - Each #UndoImageBuf stores an array of #UndoImageTile
  *       The tiles are shared between #UndoImageBuf's to avoid duplication.
  *
- * When the undo system manages an image, there will always be a full copy (as a #UndoImageBuf)
- * each new undo step only stores modified tiles.
+ * When the undo system manages an image, there will always be a full copy
+ * (as a #UndoImageBuf) each new undo step only stores modified tiles.
+ *
+ * Changeset IDs are used to track the correspondence between image buffers used
+ * in the main database and in the undo stack. An ImBuf may be allocated, freed,
+ * reloaded or resized as part of global memfile undo steps. A matching changeset
+ * ID means that it's the same image buffer and individual tiles can be restored,
+ * rather than having to do a full image buffer restore.
  */
 
 #include "CLG_log.h"
@@ -84,6 +90,18 @@ static void calc_tile_rect(
                 r_tile_pos;
 }
 
+static rcti calc_tile_region(const ImBuf &ibuf, const int x_tile, const int y_tile)
+{
+  int2 tile_pos;
+  int2 tile_size;
+  calc_tile_rect(ibuf, x_tile, y_tile, tile_pos, tile_size);
+
+  rcti region;
+  BLI_rcti_init(
+      &region, tile_pos.x, tile_pos.x + tile_size.x, tile_pos.y, tile_pos.y + tile_size.y);
+  return region;
+}
+
 struct PaintTileKey {
   int x_tile, y_tile;
   Image *image;
@@ -115,6 +133,8 @@ struct PaintTile {
   bool valid = false;
   bool use_float = false;
   int x_tile = 0, y_tile = 0;
+  /** #ImBuf::full_update_changeset_id before the tile was modified. */
+  imbuf::ChangesetID ibuf_full_update_changeset_id = -1;
   blender::Mutex mutex;
 };
 
@@ -214,6 +234,7 @@ const ImBuf *ED_image_paint_tile_push(PaintTileMap *paint_tile_map,
           ptile->x_tile = x_tile;
           ptile->y_tile = y_tile;
           ptile->use_float = has_float;
+          ptile->ibuf_full_update_changeset_id = ibuf->full_update_changeset_id;
           ptile->mutex.lock();
           *pptile = ptile;
           created = true;
@@ -308,13 +329,7 @@ static void ptile_restore_runtime_map(PaintTileMap *paint_tile_map)
                     tile_copy_size);
     }
 
-    rcti region;
-    BLI_rcti_init(&region,
-                  tile_pos.x,
-                  tile_pos.x + tile_copy_size.x,
-                  tile_pos.y,
-                  tile_pos.y + tile_copy_size.y);
-    IMB_partial_update_mark_region(ibuf, region);
+    IMB_partial_update_mark_region(ibuf, calc_tile_region(*ibuf, ptile->x_tile, ptile->y_tile));
 
     BKE_image_release_ibuf(image, ibuf, nullptr);
   }
@@ -430,7 +445,14 @@ struct UndoImageBuf {
 
   std::string ibuf_filepath;
   int ibuf_fileframe = 0;
+  /** #ImBuf::full_update_changeset_id when this state was stored. */
+  imbuf::ChangesetID ibuf_full_update_changeset_id = -1;
 
+  /**
+   * Tiles for this state of the image.
+   * \note Unmodified tiles are shared with #UndoImageBuf::post,
+   * so pointer comparison can detect tiles that don't need restoring.
+   */
   UndoImageTile **tiles = nullptr;
 
   /** Can calculate these from dims, just for convenience. */
@@ -461,6 +483,7 @@ static UndoImageBuf *ubuf_from_image_no_tiles(Image *image, const ImBuf *ibuf)
 
   ubuf->ibuf_filepath = ibuf->filepath;
   ubuf->ibuf_fileframe = ibuf->fileframe;
+  ubuf->ibuf_full_update_changeset_id = ibuf->full_update_changeset_id;
   ubuf->image_state.source = image->source;
   ubuf->image_state.use_float = ibuf->float_data() != nullptr;
 
@@ -487,20 +510,26 @@ static void ubuf_from_image_all_tiles(UndoImageBuf *ubuf, const ImBuf *ibuf)
   BLI_assert(i == ubuf->tiles_len);
 }
 
-/** Ensure we can copy the ubuf into the ibuf. */
-static void ubuf_ensure_compat_ibuf(const UndoImageBuf *ubuf, ImBuf *ibuf)
+/**
+ * Ensure we can copy the ubuf into the ibuf.
+ * \returns true if the pixel buffers were replaced.
+ */
+[[nodiscard]] static bool ubuf_ensure_compat_ibuf(const UndoImageBuf *ubuf, ImBuf *ibuf)
 {
+  bool replaced = false;
+
   /* We could have both float and rect buffers,
    * in this case free the float buffer if it's unused. */
   if ((ibuf->float_data() != nullptr) && (ubuf->image_state.use_float == false)) {
     IMB_free_float_pixels(ibuf);
+    replaced = true;
   }
 
   if (ibuf->x == ubuf->image_dims[0] && ibuf->y == ubuf->image_dims[1] &&
       (ubuf->image_state.use_float ? static_cast<void *>(ibuf->float_data_for_write()) :
                                      static_cast<void *>(ibuf->byte_data_for_write())))
   {
-    return;
+    return replaced;
   }
 
   IMB_free_all_data(ibuf);
@@ -512,6 +541,8 @@ static void ubuf_ensure_compat_ibuf(const UndoImageBuf *ubuf, ImBuf *ibuf)
   else {
     IMB_alloc_byte_pixels(ibuf);
   }
+
+  return true;
 }
 
 static void ubuf_free(UndoImageBuf *ubuf)
@@ -552,7 +583,23 @@ struct UndoImageHandle {
   ListBaseT<UndoImageBuf> buffers;
 };
 
-static void uhandle_restore_list(ListBaseT<UndoImageHandle> *undo_handles, bool use_init)
+enum class RestoreMode {
+  /** Restore only tiles this undo step changed. */
+  Changed,
+  /** Restore image buffers regenerated outside of image undo by memfile undo. */
+  FullUpdateChanged,
+  /** Restore all tiles (for debugging). */
+  All,
+};
+
+/**
+ * Copy the tiles of every #UndoImageBuf back into the image buffers.
+ *
+ * \param use_init: Restore the state before the undo step, instead of the state after it.
+ */
+static void uhandle_restore_list(ListBaseT<UndoImageHandle> *undo_handles,
+                                 const bool use_init,
+                                 const RestoreMode mode = RestoreMode::Changed)
 {
   for (UndoImageHandle &uh : *undo_handles) {
     /* Tiles only added to second set of tiles. */
@@ -566,21 +613,42 @@ static void uhandle_restore_list(ListBaseT<UndoImageHandle> *undo_handles, bool 
     bool changed = false;
     for (UndoImageBuf &ubuf_iter : uh.buffers) {
       UndoImageBuf *ubuf = use_init ? &ubuf_iter : ubuf_iter.post;
-      ubuf_ensure_compat_ibuf(ubuf, ibuf);
+      const UndoImageBuf *ubuf_other = use_init ? ubuf_iter.post : &ubuf_iter;
+
+      /* Skip image buffers without a full update, restore all tiles of others. */
+      if (mode == RestoreMode::FullUpdateChanged &&
+          ibuf->full_update_changeset_id == ubuf->ibuf_full_update_changeset_id)
+      {
+        continue;
+      }
+
+      /* Check if we need to restore all because of modified image dimensions or image
+       * buffer, or if we can do a partial restore and update. */
+      const bool ibuf_reallocated = ubuf_ensure_compat_ibuf(ubuf, ibuf);
+      const bool restore_all = ibuf_reallocated || mode != RestoreMode::Changed ||
+                               ubuf_other == nullptr ||
+                               ubuf_other->tiles_dims[0] != ubuf->tiles_dims[0] ||
+                               ubuf_other->tiles_dims[1] != ubuf->tiles_dims[1] ||
+                               ibuf->full_update_changeset_id !=
+                                   ubuf_other->ibuf_full_update_changeset_id;
 
       int i = 0;
       for (uint y_tile = 0; y_tile < ubuf->tiles_dims[1]; y_tile += 1) {
         for (uint x_tile = 0; x_tile < ubuf->tiles_dims[0]; x_tile += 1) {
-          utile_restore(ubuf->tiles[i], x_tile, y_tile, ibuf);
-          changed = true;
+          if (restore_all || ubuf->tiles[i] != ubuf_other->tiles[i]) {
+            utile_restore(ubuf->tiles[i], x_tile, y_tile, ibuf);
+            IMB_partial_update_mark_region(ibuf, calc_tile_region(*ibuf, x_tile, y_tile));
+            changed = true;
+          }
           i += 1;
         }
       }
+
+      /* Copy undo step changeset ID back to the image buffer. */
+      ibuf->full_update_changeset_id = ubuf->ibuf_full_update_changeset_id;
     }
 
     if (changed) {
-      /* TODO(@jbakker): only mark areas that are actually updated to improve performance. */
-      IMB_partial_update_mark_full(ibuf);
       IMB_mark_dirty(ibuf);
 
       DEG_id_tag_update(&image->id, 0);
@@ -727,7 +795,8 @@ static UndoImageBuf *ubuf_lookup_from_reference(ImageUndoStep *us_prev,
     if (ubuf_reference) {
       ubuf_reference = ubuf_reference->post;
       if ((ubuf_reference->image_dims[0] == ubuf->image_dims[0]) &&
-          (ubuf_reference->image_dims[1] == ubuf->image_dims[1]))
+          (ubuf_reference->image_dims[1] == ubuf->image_dims[1]) &&
+          (ubuf_reference->ibuf_full_update_changeset_id == ubuf->ibuf_full_update_changeset_id))
       {
         return ubuf_reference;
       }
@@ -770,6 +839,10 @@ static bool image_undosys_step_encode(bContext *C, Main * /*bmain*/, UndoStep *u
         UndoImageHandle *uh = uhandle_ensure(&us->handles, ptile->image, &ptile->iuser);
         UndoImageBuf *ubuf_pre = uhandle_ensure_ubuf(uh, ptile->image, ptile->ibuf);
 
+        /* Use the state before the stroke, which may itself have done a full update. */
+        ubuf_pre->ibuf_full_update_changeset_id = std::min(ubuf_pre->ibuf_full_update_changeset_id,
+                                                           ptile->ibuf_full_update_changeset_id);
+
         UndoImageTile *utile = MEM_new_zeroed<UndoImageTile>("UndoImageTile");
         utile->users = 1;
         utile->ibuf = ptile->ptile_ibuf;
@@ -800,10 +873,10 @@ static bool image_undosys_step_encode(bContext *C, Main * /*bmain*/, UndoStep *u
           ubuf_from_image_all_tiles(ubuf_post, ibuf);
         }
         else {
-          /* Search for the previous buffer. */
+          /* Search for the previous buffer, matching the state before this step. */
           UndoImageBuf *ubuf_reference =
               (us_reference ? ubuf_lookup_from_reference(
-                                  us_reference, uh.image_ref.ptr, uh.iuser.tile, ubuf_post) :
+                                  us_reference, uh.image_ref.ptr, uh.iuser.tile, &ubuf_pre) :
                               nullptr);
 
           const uint tiles_dims_x = ubuf_pre.tiles_dims[0];
@@ -863,7 +936,7 @@ static bool image_undosys_step_encode(bContext *C, Main * /*bmain*/, UndoStep *u
 
     /* Useful to debug tiles are stored correctly. */
     if (false) {
-      uhandle_restore_list(&us->handles, false);
+      uhandle_restore_list(&us->handles, false, RestoreMode::All);
     }
   }
   else {
@@ -879,10 +952,10 @@ static bool image_undosys_step_encode(bContext *C, Main * /*bmain*/, UndoStep *u
   return true;
 }
 
-static void image_undosys_step_decode_undo_impl(ImageUndoStep *us, bool is_final)
+static void image_undosys_step_decode_undo_impl(ImageUndoStep *us)
 {
   BLI_assert(us->step.is_applied == true);
-  uhandle_restore_list(&us->handles, !is_final);
+  uhandle_restore_list(&us->handles, true);
   us->step.is_applied = false;
 }
 
@@ -906,7 +979,7 @@ static void image_undosys_step_decode_undo(ImageUndoStep *us, bool is_final)
   }
   while (us_iter != us || (!is_final && us_iter == us)) {
     BLI_assert(us_iter->step.type == us->step.type); /* Previous loop ensures this. */
-    image_undosys_step_decode_undo_impl(us_iter, is_final);
+    image_undosys_step_decode_undo_impl(us_iter);
     if (us_iter == us) {
       break;
     }
@@ -944,6 +1017,12 @@ static void image_undosys_step_decode(
   }
   else if (dir == STEP_REDO) {
     image_undosys_step_decode_redo(us);
+  }
+
+  /* A memfile undo step decoded before this step may have regenerated the image buffer,
+   * e.g. when undoing image pack. Already applied steps must be restored again then. */
+  if (us->step.is_applied) {
+    uhandle_restore_list(&us->handles, false, RestoreMode::FullUpdateChanged);
   }
 
   if (us->paint_mode == PaintMode::Texture3D) {
@@ -1117,7 +1196,7 @@ void ED_image_undo_push(Image *image, ImBuf *ibuf, ImageUser *iuser, ImageUndoSt
 void ED_image_undo_push_end()
 {
   UndoStack *ustack = ED_undo_stack_get();
-  BKE_undosys_step_push(ustack, nullptr, nullptr);
+  BKE_undosys_step_push(ustack, nullptr, nullptr, UndoEncodeHints::None);
   BKE_undosys_stack_limit_steps_and_memory_defaults(ustack);
   WM_file_tag_modified();
 }

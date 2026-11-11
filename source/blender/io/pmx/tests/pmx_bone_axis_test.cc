@@ -227,7 +227,7 @@ TEST_F(PMXBoneAxisTest, PrincipalAxisLocksAndArbitraryUsesConstraint)
   EXPECT_TRUE(pchan_x->protectflag & OB_LOCK_ROTZ);
   EXPECT_FALSE(pchan_x->protectflag & OB_LOCK_ROTX);
   bool x_has_con = false;
-  for (bConstraint *c = static_cast<bConstraint *>(pchan_x->constraints.first); c != nullptr;
+  for (bConstraint *c = static_cast<bConstraint *>(pchan_x->constraints.first()); c != nullptr;
        c = c->next)
   {
     if (strcmp(c->name, "MMD_Fixed_Axis_Approx") == 0) {
@@ -240,7 +240,7 @@ TEST_F(PMXBoneAxisTest, PrincipalAxisLocksAndArbitraryUsesConstraint)
   EXPECT_TRUE(pmx_apply_fixed_axis_to_pchan(armature_object, pchan_arb, def_arb, &reports));
   bool arb_has_con = false;
   bool arb_approx = false;
-  for (bConstraint *c = static_cast<bConstraint *>(pchan_arb->constraints.first); c != nullptr;
+  for (bConstraint *c = static_cast<bConstraint *>(pchan_arb->constraints.first()); c != nullptr;
        c = c->next)
   {
     if (strcmp(c->name, "MMD_Fixed_Axis_Approx") == 0) {

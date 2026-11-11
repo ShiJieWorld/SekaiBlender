@@ -402,12 +402,12 @@ int rna_ViewLayer_active_lightgroup_index_get(PointerRNA *ptr);
 void rna_ViewLayer_active_lightgroup_index_set(PointerRNA *ptr, int value);
 /**
  * Set `r_rna_path` with the base view-layer path.
- * `rna_path_buffer_size` should be at least `sizeof(ViewLayer.name) * 3`.
+ * `r_rna_path_maxncpy` should be at least `sizeof(ViewLayer.name) * 3`.
  * \return actual length of the generated RNA path.
  */
 size_t rna_ViewLayer_path_buffer_get(const ViewLayer *view_layer,
                                      char *r_rna_path,
-                                     const size_t rna_path_buffer_size);
+                                     const size_t r_rna_path_maxncpy);
 
 /* named internal so as not to conflict with obj.update() rna func */
 void rna_Object_internal_update_data(Main *bmain, Scene *scene, PointerRNA *ptr);
@@ -588,6 +588,12 @@ IDProperty *rna_idproperty_check(PropertyRNA **prop, PointerRNA *ptr) ATTR_WARN_
 PropertyRNA *rna_ensure_property(PropertyRNA *prop) ATTR_WARN_UNUSED_RESULT;
 
 /* Override default callbacks. */
+/**
+ * Private runtime types can have independent definitions for the same type. Their properties
+ * still have to be matched by identifier and checked for compatibility before diffing.
+ */
+bool rna_struct_override_type_matches(const StructRNA *type_a, const StructRNA *type_b);
+
 /* Default override callbacks for all types. */
 /* TODO: Maybe at some point we'll want to write that in direct RNA-generated code instead
  *       (like we do for default get/set/etc.)?
@@ -642,6 +648,26 @@ void *rna_iterator_array_dereference_get(CollectionPropertyIterator *iter);
 void rna_iterator_array_end(CollectionPropertyIterator *iter);
 PointerRNA rna_array_lookup_int(
     PointerRNA *ptr, StructRNA *type, void *data, size_t itemsize, int64_t length, int64_t index);
+
+/* Construct a dynamic list of enum property items using a function
+ *   EnumPropertyItem CreateItemFn(const T &list_item, int index) */
+template<typename T, typename CreateItemFn>
+const EnumPropertyItem *rna_enum_property_items_from_listbase(const ListBaseT<T> &listbase,
+                                                              CreateItemFn create_item_fn)
+{
+  EnumPropertyItem *item = nullptr;
+  int i = 0, totitem = 0;
+
+  const T *list_item = listbase.first();
+  while (list_item) {
+    const EnumPropertyItem tmp = create_item_fn(*list_item, i);
+    RNA_enum_item_add(&item, &totitem, &tmp);
+    list_item = list_item->next;
+    ++i;
+  }
+  RNA_enum_item_end(&item, &totitem);
+  return item;
+}
 
 /* Duplicated code since we can't link in `blenlib`. */
 

@@ -26,6 +26,8 @@
 #include "draw_resource.hh"
 #include "draw_view.hh"
 
+#include "RNA_access.hh"
+
 #include <atomic>
 #include <memory>
 
@@ -57,11 +59,6 @@ class Manager {
   using ObjectInfosBuf = StorageArrayBuffer<ObjectInfos, 128>;
   using ObjectAttributeBuf = StorageArrayBuffer<ObjectAttribute, 128>;
   using LayerAttributeBuf = UniformArrayBuffer<LayerAttribute, 512>;
-  /**
-   * TODO(@fclem): Remove once we get rid of old EEVEE code-base.
-   * `DRW_RESOURCE_CHUNK_LEN = 512`.
-   */
-  using ObjectAttributeLegacyBuf = UniformArrayBuffer<float4, 8 * 512>;
 
  public:
   struct SubmitDebugOutput {
@@ -201,6 +198,8 @@ class Manager {
   void extract_object_attributes(ResourceHandleRange handle,
                                  const ObjectRef &ref,
                                  Span<GPUMaterial *> materials);
+
+  void extract_all_object_attributes(ResourceHandleRange handle, const ObjectRef &ref);
 
   /**
    * Collect necessary View Layer attributes.
@@ -541,14 +540,49 @@ inline void Manager::extract_object_attributes(ResourceHandleRange handle,
   }
 }
 
+inline void Manager::extract_all_object_attributes(ResourceHandleRange handle,
+                                                   const ObjectRef &ref)
+{
+  /* TODO: Make find_property_rgba public and call it directly. */
+  Vector<const char *, 8> attrs;
+
+  PointerRNA ob_ptr = RNA_id_pointer_create(&ref.object->id);
+  if (IDProperty *group = RNA_struct_idprops(&ob_ptr, false)) {
+    BLI_assert(group->type == IDP_GROUP);
+    for (IDProperty &prop : group->data.group) {
+      attrs.append(prop.name);
+    }
+  }
+  PointerRNA data_ptr = RNA_id_pointer_create(ref.object->data);
+  if (IDProperty *group = RNA_struct_idprops(&data_ptr, false)) {
+    BLI_assert(group->type == IDP_GROUP);
+    for (IDProperty &prop : group->data.group) {
+      attrs.append(prop.name);
+    }
+  }
+
+  int instance_index = 0;
+  for (ResourceID resource_id : handle.id_range()) {
+    ObjectInfos &infos = infos_buf.current().get_or_resize(resource_id.index());
+    infos.object_attrs_offset = attribute_len_;
+    for (const char *name : attrs) {
+      if (attributes_buf.get_or_resize(attribute_len_).sync(ref, name, false, instance_index)) {
+        infos.object_attrs_len++;
+        attribute_len_++;
+      }
+    }
+    instance_index++;
+  }
+}
+
 inline void Manager::register_layer_attributes(GPUMaterial *material)
 {
   const ListBaseT<GPULayerAttr> *attr_list = GPU_material_layer_attributes(material);
 
   if (attr_list != nullptr) {
     for (const GPULayerAttr &attr : *attr_list) {
-      /** Since layer attributes are global to the whole render pass,
-       *  this only collects a table of their names. */
+      /* Since layer attributes are global to the whole render pass,
+       * this only collects a table of their names. */
       layer_attributes.add(attr.hash_code, *&attr);
     }
   }

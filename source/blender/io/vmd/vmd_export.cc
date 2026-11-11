@@ -911,8 +911,8 @@ bool export_vmd_camera(const Object &camera,
                   "the exported pose will differ from the viewport");
     }
   }
-  if (camera.constraints.first != nullptr ||
-      (track.target_empty != nullptr && track.target_empty->constraints.first != nullptr))
+  if (camera.constraints.first() != nullptr ||
+      (track.target_empty != nullptr && track.target_empty->constraints.first() != nullptr))
   {
     add_warning(r_report,
                 reports,

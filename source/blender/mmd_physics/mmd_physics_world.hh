@@ -29,6 +29,7 @@
 #include <array>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace blender {
 
@@ -137,13 +138,16 @@ struct MMDDiagnosticContactSample {
   float applied_impulse = 0.0f;
 };
 
-/* Mesh vertex penetration sample (schema v1.1).
+/* Mesh vertex penetration sample (summary schema v2 / r27 Level A).
  * Emitted only when a sampled vertex is found INSIDE some rigid body's
- * world-space AABB. `penetration_depth` is the max axis-aligned depth
- * (positive = inside, distance from vertex to nearest AABB face).
- * Coordinates are in Blender Z-up space to match body samples. */
+ * world-space AABB. `penetration_depth` is the nearest-face containment depth
+ * (positive = inside, distance from vertex to the nearest AABB face), not an
+ * exact Bullet shape penetration depth. Coordinates are in Blender Z-up space
+ * to match body samples. The source mesh object name is retained so multi-mesh
+ * sampling is auditable. */
 struct MMDDiagnosticMeshSample {
   std::string bone_name;
+  std::string mesh_object_name;
   int vertex_index = -1;
   std::array<float, 3> position_world{};
   int inside_body_index = -1;
@@ -444,8 +448,9 @@ class MMDPhysicsWorld {
   /**
    * Test whether a point in Blender Z-up world space lies inside a body's
    * current world-space AABB. If yes, returns the body index and the
-   * penetration depth (distance from point to nearest AABB face, positive
-   * when inside). Used by the mesh-vertex penetration sampler.
+   * nearest-face AABB containment depth (distance from point to nearest face,
+   * positive when inside), not exact Bullet shape penetration depth. Used by
+   * the mesh-vertex penetration sampler.
    *
    * `bodies_to_check` is an optional filter list (body indices); pass
    * nullptr to scan all bodies. Scanning all 400+ bodies per vertex is

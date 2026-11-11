@@ -6,6 +6,8 @@
  * \ingroup edarmature
  */
 
+#include <fmt/format.h>
+
 #include "MEM_guardedalloc.h"
 
 #include "BLI_listbase.hh"
@@ -383,9 +385,7 @@ void slide_subjects_free(ListBaseT<SlideSubject> *slide_subjects)
   SlideSubject *slide_subject, *pfln = nullptr;
 
   /* free the temp pchan links and their data */
-  for (slide_subject = static_cast<SlideSubject *>(slide_subjects->first); slide_subject;
-       slide_subject = pfln)
-  {
+  for (slide_subject = slide_subjects->first(); slide_subject; slide_subject = pfln) {
     pfln = slide_subject->next;
 
     MEM_delete(slide_subject->transformable);
@@ -529,7 +529,7 @@ void slide_subjects_autokey(bContext *C,
   }
   /* This includes all motion paths for bones. Could be more fine grained in the future to avoid
    * needless updates to data that was not changed. */
-  ed::object::motion_paths_recalc(C, scene, ANIMVIZ_CALC_RANGE_CHANGED, objects);
+  ed::object::motion_paths_recalc(C, scene, objects);
   WM_event_add_notifier(C, NC_ANIMATION | ND_KEYFRAME | NA_ADDED, nullptr);
 }
 

@@ -1,9 +1,9 @@
 
 msgid ""
 msgstr ""
-"Project-Id-Version: Blender 5.3.0 Alpha (b'af9ba6af7621')\n"
+"Project-Id-Version: Blender 5.3.0 Release Candidate (b'f78a5e153839')\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-03 07:24+0000\n"
+"POT-Creation-Date: 2026-11-09 09:34+0000\n"
 "PO-Revision-Date: 2025-12-01 09:17+0000\n"
 "Last-Translator: Matt Mitacek <mattmitacek@gmail.com>\n"
 "Language-Team: Czech <https://translate.blender.org/projects/blender-ui/ui/cs/>\n"
@@ -2400,10 +2400,6 @@ msgid "Point cloud data-blocks"
 msgstr "Datové bloky bodových mraků"
 
 
-msgid "Project"
-msgstr "Projekce"
-
-
 msgid "Scene data-blocks"
 msgstr "Datové bloky scén"
 
@@ -2648,6 +2644,10 @@ msgid "Collection of worlds"
 msgstr "Kolekce se slovy"
 
 
+msgid "Project"
+msgstr "Projekce"
+
+
 msgctxt "ID"
 msgid "ID Type"
 msgstr "ID typ"
@@ -2655,6 +2655,10 @@ msgstr "ID typ"
 
 msgid "Dirty"
 msgstr "Špinavé"
+
+
+msgid "Path"
+msgstr "Cesta"
 
 
 msgid "Blender RNA"
@@ -3540,6 +3544,10 @@ msgid "Active Layer"
 msgstr "Aktivní vrstva"
 
 
+msgid "Cyclic"
+msgstr "Cyklický"
+
+
 msgid "Affect Position"
 msgstr "Ovlivnit pozici"
 
@@ -4284,10 +4292,6 @@ msgid "Color management specific to display device"
 msgstr "Správa barev specifická pro zobrazovací zařízení"
 
 
-msgid "Display"
-msgstr "Zobrazit"
-
-
 msgid "Input color space settings"
 msgstr "Nastavení vstupního barevného prostoru"
 
@@ -4298,10 +4302,6 @@ msgstr "Jsou data"
 
 msgid "Treat image as non-color data without color management, like normal or displacement maps"
 msgstr "Zacházejte s obrazem jako s nebarevnými daty bez správy barev, jako jsou normální mapy nebo mapy posunutí"
-
-
-msgid "Input Color Space"
-msgstr "Vstupní barevný prostor"
 
 
 msgid "Color space that the sequencer operates in"
@@ -4324,10 +4324,6 @@ msgid "Gamma"
 msgstr "Gama"
 
 
-msgid "Look"
-msgstr "Pohled"
-
-
 msgid "Additional transform applied before view transform for artistic needs"
 msgstr "Další transformace použitá před transformací pohledu pro umělecké potřeby"
 
@@ -4342,10 +4338,6 @@ msgstr "Použít křivky"
 
 msgid "Use RGB curved for pre-display transformation"
 msgstr "Použití zakřiveného RGB pro transformaci před zobrazením"
-
-
-msgid "View"
-msgstr "Pohled"
 
 
 msgid "Temperature"
@@ -4494,6 +4486,10 @@ msgstr "Prvky Rampy Barev"
 
 msgid "Collection of Color Ramp Elements"
 msgstr "Kolekce prvků rampy barev"
+
+
+msgid "Identifier"
+msgstr "Identifikátor"
 
 
 msgid "Console Input"
@@ -4979,10 +4975,6 @@ msgstr "Z"
 
 msgid "Target Object (Curves only)"
 msgstr "Vytvořit proxy objekt"
-
-
-msgid "Cyclic"
-msgstr "Cyklický"
 
 
 msgid "Copy Location Constraint"
@@ -5878,6 +5870,10 @@ msgid "Plane"
 msgstr "Plocha"
 
 
+msgid "View"
+msgstr "Pohled"
+
+
 msgid "Only First"
 msgstr "Pouze První"
 
@@ -6676,10 +6672,6 @@ msgstr "Hmotnost efektoru víru"
 
 msgid "Wind"
 msgstr "Vítr"
-
-
-msgid "Identifier"
-msgstr "Identifikátor"
 
 
 msgid "Value of the item"
@@ -8834,6 +8826,18 @@ msgid "Smooth Stroke"
 msgstr "Hladký Tah"
 
 
+msgid "Use Unified Color"
+msgstr "Použít sjednocenou barvu"
+
+
+msgid "Use Unified Strength"
+msgstr "Použít Sjednocenou Sílu"
+
+
+msgid "Use Unified Weight"
+msgstr "Použít Sjednocenou Hmotnost"
+
+
 msgid "Vertex weight when brush is applied"
 msgstr "Žádné skupiny vertexů"
 
@@ -9318,10 +9322,6 @@ msgid "Map Taper"
 msgstr "Stejné typy"
 
 
-msgid "Path"
-msgstr "Cesta"
-
-
 msgid "Follow"
 msgstr "Následovat Cestu"
 
@@ -9796,10 +9796,6 @@ msgstr "V"
 
 msgid "W"
 msgstr "W"
-
-
-msgid "Path to the library .blend file"
-msgstr "Uložit současný soubor Blenderu"
 
 
 msgid "Version of Blender the library .blend was saved with"
@@ -10840,6 +10836,10 @@ msgstr "Vlhkost"
 
 msgid "Amount of damping"
 msgstr "Historie vracení"
+
+
+msgid "Display"
+msgstr "Zobrazit"
 
 
 msgid "Percentage of particles to display in 3D view"
@@ -13146,22 +13146,6 @@ msgid "Type of event"
 msgstr "Typ události"
 
 
-msgid "Press"
-msgstr "Stisknout"
-
-
-msgid "Release"
-msgstr "Pustit"
-
-
-msgid "Click"
-msgstr "Klik"
-
-
-msgid "Double Click"
-msgstr "Dvojklik"
-
-
 msgid "Left Handle"
 msgstr "Vazby a spojení"
 
@@ -13368,6 +13352,10 @@ msgstr "Aktivní Objekt"
 
 msgid "Selected Objects"
 msgstr "Vybrané objekty"
+
+
+msgid "Path to the library .blend file"
+msgstr "Uložit současný soubor Blenderu"
 
 
 msgid "Modifier Name"
@@ -13863,16 +13851,12 @@ msgid "Proportional Editing Falloff"
 msgstr "Způsob útlumu"
 
 
-msgid "Instances"
-msgstr "Instance"
-
-
-msgid "Import"
-msgstr "Importovat"
-
-
 msgid "Mirror"
 msgstr "Zrcadlit"
+
+
+msgid "Instances"
+msgstr "Instance"
 
 
 msgid "UV Mapping"
@@ -13889,6 +13873,10 @@ msgstr "Navigace"
 
 msgid "Align View"
 msgstr "Zarovnat pohled"
+
+
+msgid "Import"
+msgstr "Importovat"
 
 
 msgid "Select Linked"
@@ -13927,6 +13915,10 @@ msgid "Make Single User"
 msgstr "Přivlastnit"
 
 
+msgid "Hooks"
+msgstr "Háky"
+
+
 msgid "Linked"
 msgstr "Propojené"
 
@@ -13935,24 +13927,20 @@ msgid "Layout"
 msgstr "Rozložení"
 
 
-msgid "Hooks"
-msgstr "Háky"
+msgid "Clear Transform"
+msgstr "Vyčistit transformaci"
+
+
+msgid "Propagate"
+msgstr "Vložit"
 
 
 msgid "Keying"
 msgstr "Klíčovací sestava"
 
 
-msgid "Clear Transform"
-msgstr "Vyčistit transformaci"
-
-
 msgid "Tracking"
 msgstr "Sledování"
-
-
-msgid "Propagate"
-msgstr "Vložit"
 
 
 msgid "Basic"
@@ -16492,14 +16480,6 @@ msgid "Distance between two bundles used for object scaling"
 msgstr "Vzdálenost mezi dvěmi kostmi nebo objekty"
 
 
-msgid "Fastest"
-msgstr "Vložit"
-
-
-msgid "Double"
-msgstr "Dvojklik"
-
-
 msgid "Use Blue Channel"
 msgstr "Kanál textury"
 
@@ -16770,10 +16750,6 @@ msgstr "Sada barev"
 
 msgid "Color Spill"
 msgstr "Sada barev"
-
-
-msgid "To"
-msgstr "K"
 
 
 msgid "Placeholder"
@@ -17126,6 +17102,10 @@ msgstr "Výběr"
 
 msgid "Warning"
 msgstr "Varování"
+
+
+msgid "Comment"
+msgstr "Komentovat"
 
 
 msgctxt "NodeTree"
@@ -19161,10 +19141,6 @@ msgid "Set Start Frame"
 msgstr "První frame"
 
 
-msgid "Convert to Radians"
-msgstr "Převést na Radiány"
-
-
 msgctxt "Operator"
 msgid "Align Bones"
 msgstr "Zarovnat"
@@ -19624,8 +19600,8 @@ msgstr "Kontextová Nabídka"
 
 
 msgctxt "Operator"
-msgid "Accept"
-msgstr "Přijmout"
+msgid "Select Directory"
+msgstr "Vybrat adresář"
 
 
 msgid "Directory of the file"
@@ -20257,6 +20233,10 @@ msgid "Export"
 msgstr "Exportovat"
 
 
+msgid "Filepath"
+msgstr "Důležité cesty"
+
+
 msgctxt "Operator"
 msgid "Remove from Collection"
 msgstr "Odstranit z Kolekce"
@@ -20705,10 +20685,6 @@ msgstr "Trackball"
 
 msgid "Push/Pull"
 msgstr "Tlačit/tahat"
-
-
-msgid "Bake Time"
-msgstr "Čas Bake"
 
 
 msgid "Edge Slide"
@@ -21187,6 +21163,10 @@ msgid "Visible Objects"
 msgstr "Viditelné objekty"
 
 
+msgid "Center of Mass"
+msgstr "Těžiště"
+
+
 msgid "Apply sampling to all animations"
 msgstr "Použít vzorkování pro všechny animace"
 
@@ -21397,11 +21377,6 @@ msgstr "Vybrat/odebrat všechny soubory"
 
 msgid "Select or deselect all files"
 msgstr "Vybrat/odebrat všechny soubory"
-
-
-msgctxt "Operator"
-msgid "Select Directory"
-msgstr "Vybrat adresář"
 
 
 msgid "Select a bookmarked directory"
@@ -24200,6 +24175,10 @@ msgid "Zoom in/out the background image"
 msgstr "Seznam obrázků na pozadí"
 
 
+msgid "Use Active"
+msgstr "Použít Aktivní"
+
+
 msgctxt "Operator"
 msgid "Delete with Reconnect"
 msgstr "Odstranit s připojením"
@@ -25894,10 +25873,6 @@ msgid "New Collection"
 msgstr "Nová Kolekce"
 
 
-msgid "Add a new collection inside selected collection"
-msgstr "Přidat novou kolekci uvnitř vybrané kolekce"
-
-
 msgctxt "Operator"
 msgid "Deselect Objects"
 msgstr "Odznačit Objekty"
@@ -26008,10 +25983,6 @@ msgstr "Otevřít/Zavřít"
 msgctxt "Operator"
 msgid "Rename"
 msgstr "Přejmenovat"
-
-
-msgid "Use Active"
-msgstr "Použít Aktivní"
 
 
 msgctxt "Operator"
@@ -27278,6 +27249,10 @@ msgid "Add a new screen"
 msgstr "Přidá novou obrazovku"
 
 
+msgid "Active Section"
+msgstr "Aktivní kosti"
+
+
 msgctxt "Operator"
 msgid "Redo Last"
 msgstr "Poslední znovu"
@@ -28157,10 +28132,6 @@ msgid "Toggle Comments"
 msgstr "Přepnout Komenty"
 
 
-msgid "Comment"
-msgstr "Komentovat"
-
-
 msgid "Un-Comment"
 msgstr "Od-komentovat"
 
@@ -28211,10 +28182,6 @@ msgstr "Jít na řádek"
 
 msgid "Line number to jump to"
 msgstr "Poslední frame"
-
-
-msgid "Filepath"
-msgstr "Důležité cesty"
 
 
 msgctxt "Operator"
@@ -30808,6 +30775,10 @@ msgid "Helpers"
 msgstr "Pomocníci"
 
 
+msgid "Splash Screen"
+msgstr "Uvítací okno"
+
+
 msgid "Denoising"
 msgstr "Odstranění šumu"
 
@@ -30947,10 +30918,6 @@ msgstr "Nastavení 3D myši"
 
 msgid "Save Preferences"
 msgstr "Uložit předvolby"
-
-
-msgid "Auto Run Python Scripts"
-msgstr "Spustit Python skript"
 
 
 msgid "Blend Files"
@@ -31908,10 +31875,6 @@ msgid "Limit movement around the Z axis"
 msgstr "Limituje rotaci po Z ose"
 
 
-msgid "Active Section"
-msgstr "Aktivní kosti"
-
-
 msgid "Edit Methods"
 msgstr "Editační metody"
 
@@ -32126,6 +32089,10 @@ msgstr "Komprimovat soubor"
 
 msgid "Enable file compression when saving .blend files"
 msgstr "Povolit komprimaci souboru"
+
+
+msgid "Auto Run Python Scripts"
+msgstr "Spustit Python skript"
 
 
 msgid "Drag Threshold"
@@ -33932,10 +33899,6 @@ msgid "Gravitation"
 msgstr "Gravitace"
 
 
-msgid "Center of Mass"
-msgstr "Těžiště"
-
-
 msgid "Permanent deform"
 msgstr "Data kostry"
 
@@ -34548,10 +34511,6 @@ msgid "Show Other Objects"
 msgstr "Zobrazit Ostatní Objekty"
 
 
-msgid "Sort Alphabetically"
-msgstr "Seřadit podle Abecedy"
-
-
 msgid "Filter method"
 msgstr "Metoda filtrování"
 
@@ -34568,16 +34527,16 @@ msgid "Active Tool and Workspace settings"
 msgstr "Nastavení aktivního nástroje a pracovního prostoru"
 
 
-msgid "Scene Properties"
-msgstr "Vlastnosti scény"
-
-
 msgid "Render Properties"
 msgstr "Vlastnosti rendrování"
 
 
 msgid "Output Properties"
 msgstr "Vlastnosti výstupu"
+
+
+msgid "Scene Properties"
+msgstr "Vlastnosti scény"
 
 
 msgid "View Layer Properties"
@@ -36302,18 +36261,6 @@ msgid "Compact Layout"
 msgstr "Vzhled"
 
 
-msgid "Use Unified Color"
-msgstr "Použít sjednocenou barvu"
-
-
-msgid "Use Unified Strength"
-msgstr "Použít Sjednocenou Sílu"
-
-
-msgid "Use Unified Weight"
-msgstr "Použít Sjednocenou Hmotnost"
-
-
 msgid "Length Unit"
 msgstr "Jednotky Délky"
 
@@ -36638,6 +36585,14 @@ msgid "Use Mist"
 msgstr "Limity"
 
 
+msgid "Press"
+msgstr "Stisknout"
+
+
+msgid "Release"
+msgstr "Pustit"
+
+
 msgid "Operator Properties"
 msgstr "Generátory"
 
@@ -36811,11 +36766,6 @@ msgstr "UV Editor"
 
 
 msgctxt "WindowManager"
-msgid "Image View"
-msgstr "Zobrazení Obrázku"
-
-
-msgctxt "WindowManager"
 msgid "Node Editor"
 msgstr "Editor Uzlů"
 
@@ -36883,11 +36833,6 @@ msgstr "Vše"
 msgctxt "Operator"
 msgid "None"
 msgstr "Žádný"
-
-
-msgctxt "Operator"
-msgid "Report a Bug"
-msgstr "Nahlásit chybu"
 
 
 msgid "Object Index"
@@ -37020,6 +36965,11 @@ msgstr "Varování:"
 msgctxt "Operator"
 msgid "Documentation"
 msgstr "Dokumentace"
+
+
+msgctxt "Operator"
+msgid "Report a Bug"
+msgstr "Nahlásit chybu"
 
 
 msgid "File:"
@@ -38608,6 +38558,11 @@ msgid "Path/Files"
 msgstr "Cesta/soubory"
 
 
+msgctxt "Operator"
+msgid "Text"
+msgstr "Text"
+
+
 msgid "No Items Available"
 msgstr "Nejsou k dispozici žádné položky"
 
@@ -38687,18 +38642,8 @@ msgstr "Obě strany"
 
 
 msgctxt "Operator"
-msgid "Mask..."
-msgstr "Maska..."
-
-
-msgctxt "Operator"
 msgid "Color"
 msgstr "Barva"
-
-
-msgctxt "Operator"
-msgid "Text"
-msgstr "Text"
 
 
 msgctxt "Operator"
@@ -38733,11 +38678,6 @@ msgstr "Přidat vazbu aktivní kosti"
 
 msgid "Resolutions"
 msgstr "Rozlišení"
-
-
-msgctxt "Operator"
-msgid "Clip"
-msgstr "Střih"
 
 
 msgid "Add Transition"
@@ -38968,11 +38908,6 @@ msgstr "Více..."
 
 
 msgctxt "Operator"
-msgid "Alembic (.abc)"
-msgstr "Alembic (.abc)"
-
-
-msgctxt "Operator"
 msgid "Render Image"
 msgstr "Render obrázku"
 
@@ -39008,10 +38943,6 @@ msgstr "Reference API pythonu"
 
 msgid "Auto-Save Preferences"
 msgstr "Auto-Ukládat Předvolby"
-
-
-msgid "Splash Screen"
-msgstr "Uvítací okno"
 
 
 msgid "User Tooltips"
@@ -40028,11 +39959,6 @@ msgstr "VBar malování"
 
 
 msgctxt "Operator"
-msgid "Quick Edit"
-msgstr "Rychlá úprava"
-
-
-msgctxt "Operator"
 msgid "Apply"
 msgstr "Použít"
 
@@ -40568,6 +40494,10 @@ msgid "Drag"
 msgstr "Přesun"
 
 
+msgid "Look"
+msgstr "Pohled"
+
+
 msgid "Sort By:"
 msgstr "Seřadit podle:"
 
@@ -40911,10 +40841,6 @@ msgstr "Bez vlastností"
 
 msgid "Reset operator defaults"
 msgstr "Defaultní nastavení"
-
-
-msgid "File Not Found"
-msgstr "Soubor nebyl nalezen"
 
 
 msgid "Today"
@@ -41952,6 +41878,10 @@ msgid "Median:"
 msgstr "Median:"
 
 
+msgid "Dimensions:"
+msgstr "Rozměry:"
+
+
 msgid "Radius X:"
 msgstr "Poloměr X:"
 
@@ -41974,10 +41904,6 @@ msgstr "Poloměr:"
 
 msgid "Weight:"
 msgstr "Váha:"
-
-
-msgid "Dimensions:"
-msgstr "Rozměry:"
 
 
 msgid "4L"
@@ -42226,22 +42152,6 @@ msgstr "Měřítko X: %s   Y: %s%s %s"
 
 msgid "Scale X: %s   Y: %s  Z: %s%s %s"
 msgstr "Měřítko X: %s   Y: %s  Z: %s%s %s"
-
-
-msgid "Time: +%s %s"
-msgstr "Čas: +%s %s"
-
-
-msgid "Time: %s %s"
-msgstr "Čas: %s %s"
-
-
-msgid "Time: +%.3f %s"
-msgstr "Čas: +%.3f %s"
-
-
-msgid "Time: %.3f %s"
-msgstr "Čas: %.3f %s"
 
 
 msgid "Shrink/Fatten: "
@@ -42686,6 +42596,10 @@ msgstr "Nahoře"
 
 msgid "Don't Save"
 msgstr "Neukládat"
+
+
+msgid "File Not Found"
+msgstr "Soubor nebyl nalezen"
 
 
 msgid "Modified"

@@ -10,6 +10,7 @@
 
 #include "BLI_enum_flags.hh"
 #include "BLI_math_constants.hh"
+#include "BLI_uuid.hh"
 
 #include "DNA_ID.h"
 #include "DNA_anim_enums.h"
@@ -52,6 +53,7 @@ enum eUserPref_Flag : int {
   USER_ADD_VIEWALIGNED = (1 << 19),
   USER_RELPATHS = (1 << 20),
   USER_RELEASECONFIRM = (1 << 21),
+  /** See #G_FLAG_SCRIPT_AUTOEXEC for an overview of auto-execution. */
   USER_SCRIPT_AUTOEXEC_DISABLE = (1 << 22),
   USER_FILENOUI = (1 << 23),
   USER_NONEGFRAMES = (1 << 24),
@@ -92,10 +94,11 @@ enum eUserpref_Save_Modified_Images : char {
 enum eUserPref_PrefFlag : char {
   USER_PREF_FLAG_SAVE = (1 << 0),
   USER_PREF_FLAG_PROJECT_SAVE = (1 << 1),
+  USER_PREF_FLAG_PROJECT_REMEMBER = (1 << 2),
 };
 ENUM_OPERATORS(eUserPref_PrefFlag)
 
-/* Helper macro for checking frame clamping */
+/** Helper macro for checking frame clamping. */
 #define FRAMENUMBER_MIN_CLAMP(cfra) \
   { \
     if ((U.flag & USER_NONEGFRAMES) && (cfra < 0)) { \
@@ -199,6 +202,7 @@ enum eUserpref_GPU_Flag : char {
   USER_GPU_FLAG_OVERLAY_SMOOTH_WIRE = (1 << 2),
   USER_GPU_FLAG_SUBDIVISION_EVALUATION = (1 << 3),
   USER_GPU_FLAG_FRESNEL_EDIT = (1 << 4),
+  USER_GPU_FLAG_VIDEO_DECODING = (1 << 5),
 };
 ENUM_OPERATORS(eUserpref_GPU_Flag)
 
@@ -561,6 +565,14 @@ enum eUserpref_SeqProxySetup : short {
   USER_SEQ_PROXY_SETUP_AUTOMATIC = 1,
 };
 
+enum eUserpref_VideoDecodingDevice : short {
+  USER_VIDEO_DECODING_DEVICE_AUTOMATIC = 0,
+  USER_VIDEO_DECODING_DEVICE_VIDEOTOOLBOX = 1,
+  USER_VIDEO_DECODING_DEVICE_D3D11VA = 2,
+  USER_VIDEO_DECODING_DEVICE_CUDA = 3,
+  USER_VIDEO_DECODING_DEVICE_VULKAN = 4,
+};
+
 enum eUserpref_SeqEditorFlags : int {
   USER_SEQ_ED_UNUSED_0 = (1 << 0), /* Dirty. */
   USER_SEQ_ED_CONNECT_STRIPS_BY_DEFAULT = (1 << 1),
@@ -573,12 +585,11 @@ enum eUserpref_ShaderCompileMethod : short {
   USER_SHADER_COMPILE_SUBPROCESS = 1,
 };
 
-/* Locale IDs. Auto will try to get the locale from the OS. */
+/* Locale Ids. Auto will try to get local from OS. Our default is English though. */
 /** #UserDef.language */
 enum eUserpref_Language : short {
   ULANGUAGE_AUTO = 0,
   ULANGUAGE_ENGLISH = 1,
-  ULANGUAGE_CHINESE_SIMPLIFIED = 13,
 };
 
 struct bAddon {
@@ -653,29 +664,50 @@ struct bUserAssetLibrary {
   struct bUserAssetLibrary *next = nullptr, *prev = nullptr;
 
   char name[/*MAX_NAME*/ 64] = "";
-  /** The path on disk for this asset library. For remote libraries
+  /**
+   * The path on disk for this asset library. For remote libraries
    * (#ASSET_LIBRARY_USE_REMOTE_URL), this is the download cache directory, where already
-   * downloaded assets will be placed. */
+   * downloaded assets will be placed.
+   */
   char dirpath[/*FILE_MAX*/ 1024] = "";
-  /** Only for remote asset libraries (#ASSET_LIBRARY_USE_REMOTE_URL is set). Update using
-   * #BKE_preferences_remote_asset_library_url_set() only. */
+  /**
+   * The "resolved" dirpath. This is the version of dirpath that has had variable expansion done
+   * on it and has normalized the path string and converted the directory separator to use the OS
+   * native version. This should always be used when looking for the actual asset library on disk.
+   */
+  char resolved_dirpath[/*FILE_MAX*/ 1024] = "";
+  /**
+   * Only for remote asset libraries (#ASSET_LIBRARY_USE_REMOTE_URL is set). Update using
+   * #BKE_preferences_remote_asset_library_url_set() only.
+   */
   char remote_url[/*FILE_MAX*/ 1024];
   /**
    * Secret access token for remote repositories (allocated).
-   * Only use when #ASSET_LIBRARY_USE_AUTH_TOKEN is set.
+   * Only use when #ASSET_LIBRARY_USE_AUTH_TOKEN is set. Update using
+   * #BKE_preferences_remote_asset_library_auth_token_set() only.
    */
   char *auth_token = nullptr;
+  /**
+   * The UUID of the asset library. This is used to make deduplication possible when using the
+   * same asset library from different computers.
+   */
+  bUUID uuid;
+  /**
+   * If the asset library was created with an invalid UUID string, it will be stored here.
+   * The library will be disabled and we will notify the user that it has an invalid UUID.
+   * We store the invalid UUID string so that we don't introduce any data loss when saving the
+   * UUIDs to files. (If it is invalid it is up to the end user to fix it.
+   */
+  char *invalid_uuid = nullptr;
+  /**
+   * The `{repo_module}.{pkg_id}` of the extension defining this library
+   * (see #bUserExtensionRepo::module), empty for libraries the user defined.
+   */
+  char extension_id[128] = "";
 
   short import_method = ASSET_IMPORT_PACK;  /* eAssetImportMethod */
   short flag = ASSET_LIBRARY_RELATIVE_PATH; /* eAssetLibrary_Flag */
   char _pad0[4] = {};
-
-#ifdef __cplusplus
-  bool is_enabled() const
-  {
-    return (this->flag & ASSET_LIBRARY_DISABLED) == 0;
-  }
-#endif
 };
 
 enum eUserExtensionRepo_Flag : uint8_t {
@@ -686,6 +718,16 @@ enum eUserExtensionRepo_Flag : uint8_t {
   USER_EXTENSION_REPO_FLAG_USE_REMOTE_URL = 1 << 3,
   USER_EXTENSION_REPO_FLAG_SYNC_ON_STARTUP = 1 << 4,
   USER_EXTENSION_REPO_FLAG_USE_ACCESS_TOKEN = 1 << 5,
+  /** Collapse the repository's asset libraries in the preferences list. */
+  USER_EXTENSION_REPO_FLAG_ASSET_LIBRARIES_COLLAPSED = 1 << 6,
+  /**
+   * The access token is used by asset libraries from this repository.
+   *
+   * \note This is a cache of `assetlib_auth_method` from the repository listing (`index.json`)
+   * which the extension system updates when syncing, kept for convenience so the UI can
+   * show it without reading the listing.
+   */
+  USER_EXTENSION_REPO_FLAG_USE_ACCESS_TOKEN_ASSET_LIBRARIES = 1 << 7,
 };
 ENUM_OPERATORS(eUserExtensionRepo_Flag)
 
@@ -861,17 +903,19 @@ struct UserDef_Experimental {
   char write_legacy_blend_file_format = 0;
   char no_data_block_packing = 0;
   char use_paint_debug = 0;
+  char use_video_decoding_debug = 0;
   char SANITIZE_AFTER_HERE = {};
   /* The following options are automatically sanitized (set to 0)
    * when the release cycle is not alpha. */
   char use_new_curves_tools = 0;
   char use_extended_asset_browser = 0;
-  char use_sculpt_texture_paint = 0;
+  char use_3d_texture_paint = 0;
   char use_shader_node_previews = 0;
-  /* As a temporary exception to the above sanitation rules, this flag is always ON. The work to
-   * actually remove this flag is tracked in #158903. */
+  /**
+   * As a temporary exception to the above sanitation rules, this flag is always ON. The work to
+   * actually remove this flag is tracked in #158903.
+   */
   char use_remote_asset_libraries = 1;
-  char use_collection_importer = 0;
   char _pad[4] = {};
 };
 
@@ -977,18 +1021,20 @@ struct UserDef {
   eUserpref_GPU_Flag gpu_flag = USER_GPU_FLAG_OVERLAY_SMOOTH_WIRE |
                                 USER_GPU_FLAG_SUBDIVISION_EVALUATION;
 
-  /* date_string::DateFormat */
+  /** #date_string::DateFormat */
   char date_format = 0;
-  /* date_string::TimeFormat */
+  /** #date_string::TimeFormat */
   char time_format = 0;
 
   char _pad8[4] = {};
-  /* Experimental flag for app-templates to make changes to behavior
-   * which are outside the scope of typical preferences. */
+  /**
+   * Experimental flag for app-templates to make changes to behavior
+   * which are outside the scope of typical preferences.
+   */
   eUserpref_APP_Flag app_flag = {};
   eViewZoom_Style viewzoom = USER_ZOOM_DOLLY;
-  /** Default language of Simplified Chinese (13), not Automatic (0). */
-  eUserpref_Language language = ULANGUAGE_CHINESE_SIMPLIFIED;
+  /** Default language of English (1), not Automatic (0). */
+  eUserpref_Language language = ULANGUAGE_ENGLISH;
 
   int mixbufsize = 2048;
   int audiodevice = 0;
@@ -1263,10 +1309,13 @@ struct UserDef {
   eUserpref_RenderDisplayType render_display_type = USER_RENDER_DISPLAY_WINDOW;
   eUserpref_TempSpaceDisplayType filebrowser_display_type = USER_TEMP_SPACE_DISPLAY_WINDOW;
   eUserpref_TempSpaceDisplayType preferences_display_type = USER_TEMP_SPACE_DISPLAY_WINDOW;
-  char _pad18[7] = {};
+  char _pad18[3] = {};
+
+  /** Default duration in *seconds* for strips with no inherent duration (color, text, etc). */
+  float sequencer_default_strip_length = 1.0f;
 
   eUserpref_SeqProxySetup sequencer_proxy_setup = USER_SEQ_PROXY_SETUP_AUTOMATIC;
-  short _pad1 = {};
+  eUserpref_VideoDecodingDevice video_decoding_device = USER_VIDEO_DECODING_DEVICE_AUTOMATIC;
 
   float collection_instance_empty_size = 1.0f;
   eTextEdit_Flags text_flag = {};

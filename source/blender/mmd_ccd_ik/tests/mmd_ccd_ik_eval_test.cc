@@ -88,7 +88,7 @@ class MmdCCDIKEvalTest : public bke::BlenderGTestBase {
     if (armature_finalized) {
       return;
     }
-    for (Bone *bone = static_cast<Bone *>(arm->bonebase.first); bone != nullptr;
+    for (Bone *bone = static_cast<Bone *>(arm->bonebase.first()); bone != nullptr;
          bone = bone->next)
     {
       BKE_armature_where_is_bone(bone, nullptr, true);
@@ -218,7 +218,7 @@ class MmdCCDIKEvalTest : public bke::BlenderGTestBase {
     if (!pchan) {
       return nullptr;
     }
-    for (bConstraint *con = static_cast<bConstraint *>(pchan->constraints.first);
+    for (bConstraint *con = static_cast<bConstraint *>(pchan->constraints.first());
          con != nullptr;
          con = con->next)
     {

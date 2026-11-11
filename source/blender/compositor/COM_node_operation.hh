@@ -8,11 +8,15 @@
 
 #include "BKE_node.hh"
 
-#include "NOD_geometry_nodes_warning.hh"
+#include "NOD_warning.hh"
 
 #include "COM_context.hh"
 #include "COM_operation.hh"
 #include "COM_result.hh"
+
+namespace blender {
+class ComputeContext;
+}  // namespace blender
 
 namespace blender::compositor {
 
@@ -33,8 +37,6 @@ class NodeOperation : public Operation {
   const bNode &node_;
   /* The compute context where this node operation is executing. */
   const ComputeContext *compute_context_ = nullptr;
-  /* False if node previews are not needed and true otherwise. */
-  bool needs_node_previews_ = false;
 
  public:
   /* Populate the output results based on the node outputs and populate the input descriptors based
@@ -45,18 +47,13 @@ class NodeOperation : public Operation {
    * in the context's profile data. */
   void evaluate() override;
 
-  /* Compute and set the initial reference counts of all the results of the operation. The
-   * reference counts of the results are the number of operations that use those results, which is
-   * computed as the number of inputs whose node is part of the schedule and is linked to the
-   * output corresponding to each result. The node execution schedule is given as an input. */
+  /* Compute and set the initial reference counts of all the results of the operation. The node
+   * execution schedule is given as an input. */
   void compute_results_reference_counts(const Schedule &schedule);
 
   /* Setter and getter for compute_context_. */
   void set_compute_context(const ComputeContext &compute_context);
   const ComputeContext &get_compute_context() const;
-
-  /* Setter for needs_node_previews_. */
-  void set_needs_node_previews(const bool needed);
 
  protected:
   /* Add a warning of the given type and message to the node. */

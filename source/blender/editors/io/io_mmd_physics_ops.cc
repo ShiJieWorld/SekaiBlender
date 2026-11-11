@@ -231,7 +231,7 @@ void log_physics_pose_absolute(const char *stage,
   float min_z = std::numeric_limits<float>::max();
   const char *min_z_bone = "";
   int measured = 0;
-  for (bPoseChannel *pchan = static_cast<bPoseChannel *>(armature.pose->chanbase.first);
+  for (bPoseChannel *pchan = static_cast<bPoseChannel *>(armature.pose->chanbase.first());
        pchan != nullptr;
        pchan = pchan->next)
   {
@@ -295,7 +295,7 @@ void capture_physics_pose_debug_baseline(MMDPhysicsRuntimeSession &session, Obje
   if (armature.pose == nullptr) {
     return;
   }
-  for (bPoseChannel *pchan = static_cast<bPoseChannel *>(armature.pose->chanbase.first);
+  for (bPoseChannel *pchan = static_cast<bPoseChannel *>(armature.pose->chanbase.first());
        pchan != nullptr;
        pchan = pchan->next)
   {
@@ -496,7 +496,7 @@ void capture_physics_input_pose(MMDPhysicsRuntimeSession &session,
   if (armature.pose == nullptr) {
     return;
   }
-  for (bPoseChannel *pchan = static_cast<bPoseChannel *>(armature.pose->chanbase.first);
+  for (bPoseChannel *pchan = static_cast<bPoseChannel *>(armature.pose->chanbase.first());
        pchan != nullptr;
        pchan = pchan->next)
   {
@@ -1278,12 +1278,12 @@ bool object_is_rigify_bridge_armature(const Object &object)
   if (object.pose == nullptr) {
     return false;
   }
-  for (const bPoseChannel *pchan = static_cast<const bPoseChannel *>(object.pose->chanbase.first);
+  for (const bPoseChannel *pchan = static_cast<const bPoseChannel *>(object.pose->chanbase.first());
        pchan != nullptr;
        pchan = pchan->next)
   {
     for (const bConstraint *constraint = static_cast<const bConstraint *>(
-             pchan->constraints.first);
+             pchan->constraints.first());
          constraint != nullptr;
          constraint = constraint->next)
     {
@@ -1297,7 +1297,7 @@ bool object_is_rigify_bridge_armature(const Object &object)
 
 Object *find_rigify_bridge_source(Main &bmain, const Object &rig)
 {
-  for (Object *ob = static_cast<Object *>(bmain.objects.first); ob != nullptr;
+  for (Object *ob = static_cast<Object *>(bmain.objects.first()); ob != nullptr;
        ob = static_cast<Object *>(ob->id.next))
   {
     if (ob != &rig && object_is_rigify_bridge_armature(*ob)) {
@@ -1574,7 +1574,7 @@ MMDPhysicsSceneScheduler *ensure_scene_scheduler(bContext *C, ReportList *report
   if (g_physics_scheduler != nullptr) {
     if (g_physics_scheduler->scene_session_uid != scene->id.session_uid) {
       const Scene *owner = nullptr;
-      for (const Scene *it = static_cast<const Scene *>(bmain->scenes.first); it != nullptr;
+      for (const Scene *it = static_cast<const Scene *>(bmain->scenes.first()); it != nullptr;
            it = static_cast<const Scene *>(it->id.next))
       {
         if (it->id.session_uid == g_physics_scheduler->scene_session_uid) {
@@ -2541,7 +2541,7 @@ void physics_bake_capture_pose(const Object &armature, std::vector<PhysicsBakePo
     return;
   }
   for (const bPoseChannel *pchan =
-           static_cast<const bPoseChannel *>(armature.pose->chanbase.first);
+           static_cast<const bPoseChannel *>(armature.pose->chanbase.first());
        pchan != nullptr;
        pchan = pchan->next)
   {
@@ -3736,6 +3736,16 @@ wmOperatorStatus physics_capture_diagnostics_exec(bContext *C, wmOperator *op)
   }
 
   mmd_physics::MMDDiagnosticCaptureOptions options;
+  options.fixed_step_hz = RNA_int_get(op->ptr, "fixed_step_hz");
+  options.steps = RNA_int_get(op->ptr, "steps");
+  if (options.fixed_step_hz < 30 || options.fixed_step_hz > 480 || options.steps < 1 ||
+      options.steps > 100000)
+  {
+    BKE_report(op->reports,
+               RPT_ERROR,
+               "MMD Physics: diagnostics fixed_step_hz must be 30..480 and steps must be 1..100000");
+    return OPERATOR_CANCELLED;
+  }
   options.startup_prewarm_steps = RNA_int_get(op->ptr, "startup_prewarm_steps");
   options.startup_sync_steps = RNA_int_get(op->ptr, "startup_sync_steps");
   options.capture_initial_state = RNA_boolean_get(op->ptr, "capture_initial_state");
@@ -3768,13 +3778,17 @@ wmOperatorStatus physics_capture_diagnostics_exec(bContext *C, wmOperator *op)
       start = end + 1;
     }
   }
+  std::sort(options.mesh_sample_bones.begin(), options.mesh_sample_bones.end());
+  options.mesh_sample_bones.erase(
+      std::unique(options.mesh_sample_bones.begin(), options.mesh_sample_bones.end()),
+      options.mesh_sample_bones.end());
   options.mesh_sample_interval = RNA_int_get(op->ptr, "mesh_sample_interval");
   options.mesh_max_vertices_per_bone = RNA_int_get(op->ptr, "mesh_max_vertices_per_bone");
 
   Depsgraph *depsgraph = CTX_data_depsgraph_pointer(C);
   const mmd_physics::MMDDiagnosticCaptureResult result =
       mmd_physics::capture_mmd_physics_diagnostics(
-          definition, armature, bmain, depsgraph, options);
+          definition, armature, model_collection, bmain, depsgraph, options);
   if (!result.success) {
     BKE_report(op->reports, RPT_ERROR, result.error.c_str());
     return OPERATOR_CANCELLED;
@@ -3984,7 +3998,7 @@ void mmd_physics_panel_draw(const bContext *C, Panel *panel)
   const double scene_fps = 1.0 / scene_seconds_per_frame(scene);
   std::vector<Object *> model_armatures;
   if (bmain != nullptr) {
-    for (Object *armature = static_cast<Object *>(bmain->objects.first); armature != nullptr;
+    for (Object *armature = static_cast<Object *>(bmain->objects.first()); armature != nullptr;
          armature = reinterpret_cast<Object *>(armature->id.next))
     {
       if (armature->type != OB_ARMATURE) {
@@ -4347,6 +4361,25 @@ void WM_OT_mmd_physics_capture_diagnostics(wmOperatorType *ot)
   ot->exec = physics_capture_diagnostics_exec;
   ot->poll = poll_armature;
   ot->flag = OPTYPE_INTERNAL;
+
+  RNA_def_int(ot->srna,
+              "fixed_step_hz",
+              120,
+              std::numeric_limits<int>::min(),
+              std::numeric_limits<int>::max(),
+              "Fixed Step Hz",
+              "Fixed physics simulation rate used by this isolated capture (30..480)",
+              30,
+              480);
+  RNA_def_int(ot->srna,
+              "steps",
+              240,
+              std::numeric_limits<int>::min(),
+              std::numeric_limits<int>::max(),
+              "Steps",
+              "Number of fixed physics steps to capture (1..100000)",
+              1,
+              100000);
 
   RNA_def_boolean(ot->srna,
                   "disable_rigid_body_contacts",

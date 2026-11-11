@@ -23,6 +23,7 @@
 #include "DNA_userdef_types.h"
 #include "DNA_windowmanager_types.h"
 
+#include "BLI_fileops.hh"
 #include "BLI_listbase.hh"
 #include "BLI_memory_cache.hh"
 #include "BLI_path_utils.hh"
@@ -36,6 +37,7 @@
 #include "BLO_writefile.hh"
 
 #include "BKE_blender.hh"
+#include "BKE_blender_project.hh"
 #include "BKE_blendfile.hh"
 #include "BKE_callbacks.hh"
 #include "BKE_context.hh"
@@ -49,6 +51,8 @@
 #include "BKE_mball_tessellate.hh"
 #include "BKE_preferences.h"
 #include "BKE_preview_image.hh"
+#include "BKE_recents.hh"
+#include "BKE_report.hh"
 #include "BKE_scene.hh"
 #include "BKE_screen.hh"
 #include "BKE_sound.hh"
@@ -196,7 +200,7 @@ static void sound_jack_sync_callback(Main *bmain, int mode, double time)
     return;
   }
 
-  wmWindowManager *wm = static_cast<wmWindowManager *>(bmain->wm.first);
+  wmWindowManager *wm = bmain->wm.first();
 
   for (wmWindow &window : wm->windows) {
     Scene *scene = WM_window_get_active_scene(&window);
@@ -247,6 +251,10 @@ void WM_init(bContext *C, int argc, const char **argv)
   ED_node_init_butfuncs();
 
   BLF_init();
+
+  if (!G.background) {
+    recents::init_async();
+  }
 
   BLT_lang_init();
   /* Must call first before doing any `.blend` file reading,
@@ -382,7 +390,7 @@ void WM_init(bContext *C, int argc, const char **argv)
   wm_init_scripts_extensions_once(C);
 
   WM_keyconfig_update_postpone_end();
-  WM_keyconfig_update_on_startup(static_cast<wmWindowManager *>(G_MAIN->wm.first));
+  WM_keyconfig_update_on_startup(G_MAIN->wm.first());
 
   wm_homefile_read_post(C, params_file_read_post);
 }
@@ -418,6 +426,31 @@ void WM_init_splash_on_startup(bContext *C)
   WM_init_splash(C);
 }
 
+bool wm_init_last_project_on_startup(Main *bmain)
+{
+  if (G.background || !(U.pref_flag & USER_PREF_FLAG_PROJECT_REMEMBER)) {
+    return false;
+  }
+
+  const std::string root_path = recents::Section("project").get<std::string>("last");
+  if (root_path.empty() || !BLI_is_dir(root_path.c_str())) {
+    return false;
+  }
+
+  return BKE_blender_project_init_from_root_path(bmain, root_path);
+}
+
+static void wm_exit_project_data_store(Main *bmain)
+{
+  BKE_blender_project_config_autosave(bmain);
+
+  const std::string root_path = BKE_blender_project_read_callback(
+      bmain, [](const bke::BlenderProject *project) {
+        return project ? std::string(project->get_root_path()) : std::string();
+      });
+  recents::Section("project").set("last", root_path);
+}
+
 void WM_init_splash(bContext *C)
 {
   wmWindowManager *wm = CTX_wm_manager(C);
@@ -427,7 +460,7 @@ void WM_init_splash(bContext *C)
   }
 
   wmWindow *prevwin = CTX_wm_window(C);
-  CTX_wm_window_set(C, static_cast<wmWindow *>(wm->windows.first));
+  CTX_wm_window_set(C, wm->windows.first());
   WM_operator_name_call(C, "WM_OT_splash", wm::OpCallContext::InvokeDefault, nullptr, nullptr);
   CTX_wm_window_set(C, prevwin);
 }
@@ -480,7 +513,7 @@ void wm_exit_schedule_delayed(const bContext *C)
   }
   else {
     /* Unlikely but possible, in this case just ensure exit runs as it's not interactive. */
-    wmWindowManager *wm = static_cast<wmWindowManager *>(G_MAIN->wm.first);
+    wmWindowManager *wm = G_MAIN->wm.first();
     for (wmWindow &win : wm->windows) {
       wm_exit_schedule_delayed_for_window(C, win);
     }
@@ -509,6 +542,8 @@ void WM_exit_ex(bContext *C, const bool do_python_exit, const bool do_user_exit_
   /* NOTE: same code copied in `wm_files.cc`. */
   if (C && wm) {
     if (do_user_exit_actions) {
+      wm_exit_project_data_store(CTX_data_main(C));
+
       /* Save quit.blend. */
       Main *bmain = CTX_data_main(C);
       char filepath[FILE_MAX];
@@ -655,6 +690,10 @@ void WM_exit_ex(bContext *C, const bool do_python_exit, const bool do_user_exit_
   WM_uilisttype_free();
 
   BLF_exit();
+
+  if (!G.background && do_user_exit_actions) {
+    recents::save();
+  }
 
   BLT_lang_free();
 

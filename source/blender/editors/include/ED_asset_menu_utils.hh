@@ -14,7 +14,11 @@
 
 #include "RNA_types.hh"
 
+#include "WM_types.hh"
+
 namespace blender {
+
+using BIFIconID = int;
 
 struct AssetWeakReference;
 
@@ -40,7 +44,19 @@ void draw_node_menu_for_catalog(const asset_system::AssetCatalogTreeItem &item,
                                 ui::Layout &layout);
 void draw_asset_menu_item(const asset_system::AssetRepresentation *asset,
                           StringRefNull opname,
+                          wm::OpCallContext operator_call_context,
                           ui::Layout &layout);
+/**
+ * Overload that allows adding the actual menu item button in a callback, with a layout prepared
+ * for listing assets.
+ * \param draw_item_fn: The function to insert the button. The passed layout will have the asset
+ *     context pointer assigned so the context menu can show operations (like "Download Asset"),
+ *     and the layout will be grayed out in case the asset needs downloading. The passed icon
+ *     represents the online asset status.
+ */
+void draw_asset_menu_item(const asset_system::AssetRepresentation *asset,
+                          ui::Layout &layout,
+                          FunctionRef<void(ui::Layout &, BIFIconID)> draw_item_fn);
 
 void operator_asset_reference_props_set(const asset_system::AssetRepresentation &asset,
                                         PointerRNA &ptr);

@@ -88,7 +88,7 @@ class MmdCCDIKTest : public bke::BlenderGTestBase {
 
     BKE_armature_where_is_bone(root, nullptr, true);
     BKE_pose_rebuild(bmain, arm_obj, arm, true);
-    for (bPoseChannel *pchan = static_cast<bPoseChannel *>(arm_obj->pose->chanbase.first);
+    for (bPoseChannel *pchan = static_cast<bPoseChannel *>(arm_obj->pose->chanbase.first());
          pchan != nullptr;
          pchan = pchan->next)
     {
@@ -168,7 +168,7 @@ class MmdCCDIKV2Test : public bke::BlenderGTestBase {
 
     BKE_armature_where_is_bone(root, nullptr, true);
     BKE_pose_rebuild(bmain, arm_obj, arm, true);
-    for (bPoseChannel *pchan = static_cast<bPoseChannel *>(arm_obj->pose->chanbase.first);
+    for (bPoseChannel *pchan = static_cast<bPoseChannel *>(arm_obj->pose->chanbase.first());
          pchan != nullptr;
          pchan = pchan->next)
     {

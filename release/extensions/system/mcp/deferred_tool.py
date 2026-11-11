@@ -31,7 +31,7 @@ import time
 import traceback
 from collections.abc import Callable
 
-from .mcp_to_blender_server import _encode_response
+from .mcp_to_blender_server import _encode_response, _queue_response
 
 # Total wall-time in seconds allowed for a background task (e.g. rendering) to complete.
 # When exceeded, an error response is sent and the connection is closed.
@@ -76,14 +76,8 @@ _deferred_clients: list[_DeferredClient] = []
 
 
 def _send_and_close(dc: _DeferredClient, response: dict[str, object]) -> None:
-    try:
-        dc.conn.sendall(_encode_response(response))
-    except OSError:
-        pass
-    try:
-        dc.conn.close()
-    except OSError:
-        pass
+    # Interactive mode writes from the I/O thread (never blocks the main thread).
+    _queue_response(dc.conn, _encode_response(response), True)
     try:
         _deferred_clients.remove(dc)
     except ValueError:

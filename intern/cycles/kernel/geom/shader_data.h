@@ -16,6 +16,8 @@
 #include "kernel/geom/point_intersect.h"
 #include "kernel/geom/triangle_intersect.h"
 
+#include "kernel/sample/pattern.h"
+
 #include "kernel/util/differential.h"
 
 CCL_NAMESPACE_BEGIN
@@ -43,11 +45,10 @@ ccl_device_noinline
 #else
 ccl_device_inline
 #endif
-    void
-    shader_setup_from_ray(KernelGlobals kg,
-                          ccl_private ShaderData *ccl_restrict sd,
-                          const ccl_private Ray *ccl_restrict ray,
-                          const ccl_private Intersection *ccl_restrict isect)
+    void shader_setup_from_ray(KernelGlobals kg,
+                               ccl_private ShaderData *ccl_restrict sd,
+                               const ccl_private Ray *ccl_restrict ray,
+                               const ccl_private Intersection *ccl_restrict isect)
 {
   /* Read intersection data into shader globals.
    *
@@ -82,7 +83,7 @@ ccl_device_inline
   else
 #endif
 #ifdef __POINTCLOUD__
-      if (sd->type & PRIMITIVE_POINT)
+      if (sd->type & PRIMITIVE_ANY_POINT)
   {
     /* point */
     point_shader_setup(kg, sd, isect, ray);
@@ -476,5 +477,20 @@ ccl_device_inline void shader_setup_from_volume(ccl_private ShaderData *ccl_rest
   sd->ray_P = ray->P;
 }
 #endif /* __VOLUME__ */
+
+#ifdef __SPECTRAL__
+/* If shader requires, draw a random number for sampling a wavelength. */
+ccl_device_inline void shader_setup_wavelength(KernelGlobals kg,
+                                               ccl_private ShaderData *ccl_restrict sd,
+                                               ConstIntegratorState state)
+{
+  if (sd->shader_flag & SD_REQUIRES_WAVELENGTH) {
+    const uint pixel = INTEGRATOR_STATE(state, path, rng_pixel);
+    const uint sample = INTEGRATOR_STATE(state, path, sample);
+    /* Same random number per path, irrelevant of the bounce. */
+    sd->rand_wavelength = path_rng_1D(kg, pixel, sample, PRNG_BOUNCE_NUM + PRNG_WAVELENGTH);
+  }
+}
+#endif
 
 CCL_NAMESPACE_END

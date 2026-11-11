@@ -2,6 +2,10 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup imbuf
+ */
+
 #include <mutex>
 #include <optional>
 
@@ -43,8 +47,6 @@ static int chunk_number_for_pixel(int pixel_offset)
   }
   return chunk_offset;
 }
-
-using ChangesetID = int64_t;
 
 /** Dirty chunks of a buffer at a given resolution. */
 struct Changeset {
@@ -176,11 +178,13 @@ struct Changeset {
   }
 };
 
-/** Global change ID tracking.
+/**
+ * Global change ID tracking.
  *
  * This is global so that consumers can store only changeset IDs and detect changes even
  * as image buffers change. If they would store #ImBuf pointers, the same #ImBuf address
- * might get reused for another UDIM tile or pass. */
+ * might get reused for another UDIM tile or pass.
+ */
 static uint64_t g_change_id_counter = 0;
 
 /** Tracker of changes to an image buffer over time. */
@@ -360,9 +364,10 @@ static Tracker &tracker_ensure(ImBuf *ibuf)
      *
      * The GPU changeset ID is used if there is already a GPU texture, so GPU texture consumers
      * do not get unnecessarily updated. */
-    const int64_t gpu_changeset_id = ibuf->gpu.partial_update_changeset;
-    const int64_t changeset_id = gpu_changeset_id >= 0 ? gpu_changeset_id :
-                                                         IMB_partial_update_changeset_id_next();
+    const ChangesetID gpu_changeset_id = ibuf->gpu.partial_update_changeset_id;
+    const ChangesetID changeset_id = gpu_changeset_id >= 0 ?
+                                         gpu_changeset_id :
+                                         IMB_partial_update_changeset_id_next();
     ibuf->partial_update = MEM_new<Tracker>(__func__, changeset_id);
   }
   return *ibuf->partial_update;
@@ -381,22 +386,22 @@ static bool imb_track_updates(const ImBuf *ibuf)
   return ibuf->partial_update != nullptr || ibuf->gpu.texture != nullptr;
 }
 
-int64_t IMB_partial_update_changeset_id_next()
+imbuf::ChangesetID IMB_partial_update_changeset_id_next()
 {
-  return int64_t(atomic_add_and_fetch_uint64(&g_change_id_counter, 1));
+  return imbuf::ChangesetID(atomic_add_and_fetch_uint64(&g_change_id_counter, 1));
 }
 
-int64_t IMB_partial_update_changeset_id_current()
+imbuf::ChangesetID IMB_partial_update_changeset_id_current()
 {
-  return int64_t(atomic_load_uint64(&g_change_id_counter));
+  return imbuf::ChangesetID(atomic_load_uint64(&g_change_id_counter));
 }
 
 void IMB_partial_update_mark_region(ImBuf *ibuf, const rcti &region)
 {
+  std::scoped_lock lock(ibuf->partial_update_mutex);
   if (!imb_track_updates(ibuf)) {
     return;
   }
-  std::scoped_lock lock(ibuf->partial_update_mutex);
   Tracker &tracker = tracker_ensure(ibuf);
   tracker.update_resolution(ibuf);
   tracker.mark_region(region);
@@ -404,10 +409,12 @@ void IMB_partial_update_mark_region(ImBuf *ibuf, const rcti &region)
 
 void IMB_partial_update_mark_full(ImBuf *ibuf)
 {
+  ibuf->full_update_changeset_id = IMB_partial_update_changeset_id_next();
+
+  std::scoped_lock lock(ibuf->partial_update_mutex);
   if (!imb_track_updates(ibuf)) {
     return;
   }
-  std::scoped_lock lock(ibuf->partial_update_mutex);
   Tracker &tracker = tracker_ensure(ibuf);
   tracker.mark_full_update();
 }
@@ -425,7 +432,7 @@ void IMB_partial_update_flush(ImBuf *ibuf)
   tracker.ensure_empty_changeset();
 }
 
-Changes IMB_partial_update_collect(ImBuf *ibuf, const int64_t last_changeset_id)
+Changes IMB_partial_update_collect(ImBuf *ibuf, const imbuf::ChangesetID last_changeset_id)
 {
   std::scoped_lock lock(ibuf->partial_update_mutex);
   Tracker &tracker = tracker_ensure(ibuf);

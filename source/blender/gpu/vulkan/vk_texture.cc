@@ -43,11 +43,13 @@ static VkImageAspectFlags to_vk_image_aspect_single_bit(const VkImageAspectFlags
 
 VKTexture::~VKTexture()
 {
-  if (vk_image_ != VK_NULL_HANDLE && allocation_ != VK_NULL_HANDLE) {
-    VKDiscardPool::discard_pool_get().discard_image(vk_image_, allocation_);
-    vk_image_ = VK_NULL_HANDLE;
-    allocation_ = VK_NULL_HANDLE;
+  if (resource_.vk_handle != VK_NULL_HANDLE && allocation_ != VK_NULL_HANDLE) {
+    /* Release the owner reference; at zero ref count the image becomes discardable. */
+    VKDevice &device = VKBackend::get().device;
+    device.resources.deref_resource(resource_.resource_handle);
   }
+  resource_.resource_handle = 0;
+  allocation_ = VK_NULL_HANDLE;
 }
 
 void VKTexture::generate_mipmap()
@@ -209,6 +211,9 @@ void VKTexture::read_sub(
   TransferRegion full_transfer_region({offset, extent, layers});
   const VkDeviceSize sample_bytesize = to_bytesize(device_format_);
   const VkDeviceSize host_sample_bytesize = to_bytesize(format_, format);
+  /* For a texture view the raw bytes are reinterpretable with the base format but must be read
+   * back as the view (#format_) for them to be numerically correct. */
+  const TextureFormat data_storage_format = is_texture_view() ? format_ : device_format_;
   const uint64_t x_bytesize = sample_bytesize * extent.x;
   const uint64_t xy_bytesize = x_bytesize * extent.y;
   const uint64_t xyz_bytesize = xy_bytesize * extent.z;
@@ -326,7 +331,7 @@ void VKTexture::read_sub(
                            sample_len,
                            format,
                            format_,
-                           device_format_);
+                           data_storage_format);
   }
 }
 
@@ -435,7 +440,7 @@ void VKTexture::update_sub(int mip,
         {vk_image_aspects, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS},
     };
     device.functions.vkTransitionImageLayout(device.vk_handle(), 1, &image_layout_transition);
-    device.resources.update_image_layout(vk_image_handle(),
+    device.resources.update_image_layout(resource_.resource_handle,
                                          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     /* TODO: Add support for VK_HOST_IMAGE_COPY_MEMCPY_EXT flag. It would theoretically allow
      * faster uploading, but requires sub resource to match our CPU layout. */
@@ -658,11 +663,14 @@ bool VKTexture::init_internal(gpu::Texture *src, bool use_stencil)
   return true;
 }
 
-void VKTexture::init_swapchain(VkImage vk_image, TextureFormat format)
+void VKTexture::init_swapchain(VkImage vk_image,
+                               ResourceHandle resource_handle,
+                               TextureFormat format)
 {
   device_format_ = format_ = format;
   format_flag_ = to_format_flag(format);
-  vk_image_ = vk_image;
+  resource_.resource_handle = resource_handle;
+  resource_.vk_handle = vk_image;
   type_ = GPU_TEXTURE_2D;
   usage_set(GPU_TEXTURE_USAGE_ATTACHMENT | GPU_TEXTURE_USAGE_SHADER_WRITE);
 }
@@ -680,7 +688,7 @@ static float memory_priority(const eGPUTextureUsage texture_usage)
 
 bool VKTexture::allocate()
 {
-  BLI_assert(vk_image_ == VK_NULL_HANDLE);
+  BLI_assert(resource_.vk_handle == VK_NULL_HANDLE);
   BLI_assert(!is_texture_view());
 
   VkExtent3D vk_extent = vk_extent_3d(0);
@@ -710,7 +718,20 @@ bool VKTexture::allocate()
   image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
   image_info.usage = to_vk_image_usage(
       gpu_image_usage_flags_, format_flag_, allow_host_image_copy_);
+  vk_image_usage_ = image_info.usage;
   image_info.samples = VK_SAMPLE_COUNT_1_BIT;
+
+  /* When this texture will be used with multiple formats, we need to provide them up front. */
+  VkFormat view_formats[2];
+  VkImageFormatListCreateInfo format_list_info = {VK_STRUCTURE_TYPE_IMAGE_FORMAT_LIST_CREATE_INFO};
+  if (vk_need_extended_usage_for_storage_image(texture_usage, format_flag_)) {
+    view_formats[0] = image_info.format;
+    view_formats[1] = vk_extended_usage_storage_image_format(image_info.format);
+    format_list_info.viewFormatCount = 2;
+    format_list_info.pViewFormats = view_formats;
+    format_list_info.pNext = image_info.pNext;
+    image_info.pNext = &format_list_info;
+  }
 
   VkResult result;
   if (G.debug & G_DEBUG_GPU) {
@@ -736,6 +757,7 @@ bool VKTexture::allocate()
   allocCreateInfo.priority = memory_priority(texture_usage);
 
   if (bool(texture_usage & GPU_TEXTURE_USAGE_MEMORY_EXPORT)) {
+    external_memory_create_info.pNext = image_info.pNext;
     image_info.pNext = &external_memory_create_info;
     external_memory_create_info.handleTypes = vk_external_memory_handle_type();
     allocCreateInfo.pool = device.vma_pools.external_memory_image.pool;
@@ -749,16 +771,17 @@ bool VKTexture::allocate()
   result = vmaCreateImage(device.mem_allocator_get(),
                           &image_info,
                           &allocCreateInfo,
-                          &vk_image_,
+                          &resource_.vk_handle,
                           &allocation_,
                           &allocation_info_);
   if (result != VK_SUCCESS) {
     return false;
   }
-  debug::object_label(vk_image_, name_.c_str());
+  debug::object_label(resource_.vk_handle, name_.c_str());
 
   const bool use_subresource_tracking = image_info.arrayLayers > 1 || image_info.mipLevels > 1;
-  device.resources.add_image(vk_image_, use_subresource_tracking, name_.c_str());
+  resource_.resource_handle = device.resources.add_image(
+      resource_.vk_handle, use_subresource_tracking, allocation_, name_.c_str());
 
   return result == VK_SUCCESS;
 }
@@ -805,6 +828,11 @@ const VKImageView &VKTexture::image_view_get(VKImageViewArrayed arrayed, VKImage
     vk_format = to_vk_format(format_);
   }
 
+  /* For binding as a storage image, we may need to switch to another format. */
+  if (flag_is_set(flags, VKImageViewFlags::FOR_STORAGE_IMAGE)) {
+    vk_format = vk_extended_usage_storage_image_format(vk_format);
+  }
+
   VKImageViewInfo image_view_info = {eImageViewUsage::ShaderBinding,
                                      layer_range(),
                                      mip_map_range(),
@@ -830,7 +858,5 @@ const VKImageView &VKTexture::image_view_get(VKImageViewArrayed arrayed, VKImage
   }
   return image_view_get(image_view_info);
 }
-
-/** \} */
 
 }  // namespace blender::gpu

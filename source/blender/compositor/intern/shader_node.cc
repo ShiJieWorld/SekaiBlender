@@ -84,6 +84,8 @@ static GPUType gpu_type_from_socket(const bNodeSocket &socket)
     case SOCK_SCENE:
     case SOCK_TEXT_ID:
     case SOCK_MASK:
+    case SOCK_BUNDLE:
+    case SOCK_CLOSURE:
       /* Single only types do not support GPU code path. */
       BLI_assert(Result::is_single_value_only_type(get_node_socket_result_type(&socket)));
       BLI_assert_unreachable();
@@ -106,26 +108,7 @@ static void populate_gpu_node_stack(const bNodeSocket &socket, GPUNodeStack &sta
   stack.type = gpu_type_from_socket(socket);
 
   /* This will be initialized by the GPU material compiler if needed. */
-  switch (stack.type) {
-    case GPU_FLOAT:
-    case GPU_VEC2:
-    case GPU_VEC3:
-    case GPU_VEC4:
-      zero_v4(stack.vec);
-      break;
-    case GPU_INT:
-    case GPU_INT2:
-    case GPU_INT3:
-    case GPU_INT4:
-      stack.integer_data = int4(0);
-      break;
-    case GPU_BOOL:
-      stack.boolean_data = false;
-      break;
-    default:
-      zero_v4(stack.vec);
-      break;
-  }
+  stack.value = GPU_node_stack_default_value(stack.type);
 
   stack.hasinput = socket.is_logically_linked();
   stack.hasoutput = socket.is_logically_linked();

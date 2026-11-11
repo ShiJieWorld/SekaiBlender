@@ -121,7 +121,7 @@ static int mmd_auto_apply_ik(Main *bmain, Object *ob, ReportList *reports)
       continue;
     }
     bool already = false;
-    for (bConstraint *con = static_cast<bConstraint *>(pchan->constraints.first); con != nullptr;
+    for (bConstraint *con = static_cast<bConstraint *>(pchan->constraints.first()); con != nullptr;
          con = con->next) {
       if (strcmp(con->name, "MMD_IK_Approx") == 0) {
         already = true;
@@ -687,7 +687,7 @@ static void mmd_organize_bone_collections(Object *ob)
   BoneCollection *physics_bcoll = ANIM_armature_bonecoll_new(arm, "Physics");
   BoneCollection *extra_bcoll = ANIM_armature_bonecoll_new(arm, "Extras");
 
-  for (bPoseChannel *pchan = static_cast<bPoseChannel *>(ob->pose->chanbase.first);
+  for (bPoseChannel *pchan = static_cast<bPoseChannel *>(ob->pose->chanbase.first());
        pchan;
        pchan = pchan->next)
   {
@@ -809,7 +809,7 @@ static wmOperatorStatus wm_pmx_apply_ik_exec(bContext *C, wmOperator *op)
     }
     if (pchan == nullptr || chain_count < 1) { continue; }
     bool already = false;
-    for (bConstraint *con = static_cast<bConstraint *>(pchan->constraints.first); con != nullptr;
+    for (bConstraint *con = static_cast<bConstraint *>(pchan->constraints.first()); con != nullptr;
          con = con->next) {
       if (strcmp(con->name, "MMD_IK_Approx") == 0) { already = true; break; }
     }
@@ -1073,7 +1073,7 @@ static wmOperatorStatus wm_pmx_apply_append_transform_exec(bContext *C, wmOperat
     /* Q4 reverse-order warning. */
     if (has_ik) {
       bool has_ik_con = false;
-      for (bConstraint *c = static_cast<bConstraint *>(pchan->constraints.first); c != nullptr;
+      for (bConstraint *c = static_cast<bConstraint *>(pchan->constraints.first()); c != nullptr;
            c = c->next) {
         if (strcmp(c->name, "MMD_IK_Approx") == 0) {
           has_ik_con = true;

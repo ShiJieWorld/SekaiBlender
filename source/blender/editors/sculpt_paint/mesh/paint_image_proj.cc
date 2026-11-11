@@ -1282,7 +1282,7 @@ static VertSeam *find_adjacent_seam(const ProjPaintState *ps,
                                     VertSeam **r_seam)
 {
   ListBaseT<VertSeam> *vert_seams = &ps->vertSeams[vert_index];
-  VertSeam *seam = static_cast<VertSeam *>(vert_seams->first);
+  VertSeam *seam = vert_seams->first();
   VertSeam *adjacent = nullptr;
 
   while (seam->loop != loop_index) {
@@ -1502,7 +1502,7 @@ static void insert_seam_vert_array(const ProjPaintState *ps,
   for (uint i = 0; i < 2; i++) {
     const int vert = ps->corner_verts_eval[tri[fidx[i]]];
     ListBaseT<VertSeam> *list = &ps->vertSeams[vert];
-    VertSeam *item = static_cast<VertSeam *>(list->first);
+    VertSeam *item = list->first();
 
     while (item && item->angle < vseam[i].angle) {
       item = item->next;
@@ -4441,9 +4441,7 @@ static void project_paint_build_proj_ima(ProjPaintState *ps,
   projIma = ps->projImages = static_cast<ProjPaintImage *>(
       BLI_memarena_alloc(arena, sizeof(ProjPaintImage) * ps->image_tot));
 
-  for (entry = static_cast<PrepareImageEntry *>(used_images->first); entry;
-       entry = entry->next, projIma++)
-  {
+  for (entry = used_images->first(); entry; entry = entry->next, projIma++) {
     projIma->iuser = entry->iuser;
     int size;
     projIma->ima = entry->ima;
@@ -4468,22 +4466,76 @@ static void project_paint_build_proj_ima(ProjPaintState *ps,
   }
 }
 
+/** The image being prepared, skips the lookup as adjacent faces typically share an image. */
+struct PrepareImageState {
+  Image *ima = nullptr;
+  int tile = -1;
+  int image_index = -1;
+};
+
+/**
+ * Return the index of `tpage` & `tile` in `used_images`,
+ * adding it when not found, -1 when the image has no buffer.
+ */
+static int project_paint_prepare_image_index(ProjPaintState *ps,
+                                             ListBaseT<PrepareImageEntry> &used_images,
+                                             Image *tpage,
+                                             const int tile,
+                                             PrepareImageState &state)
+{
+  if (state.ima == tpage && state.tile == tile) {
+    return state.image_index;
+  }
+
+  int image_index = 0;
+  for (PrepareImageEntry *e = used_images.first(); e; e = e->next, image_index++) {
+    if (e->ima == tpage && e->iuser.tile == tile) {
+      break;
+    }
+  }
+
+  if (image_index == ps->image_tot) {
+    /* XXX get appropriate ImageUser instead */
+    ImageUser iuser;
+    BKE_imageuser_default(&iuser);
+    iuser.tile = tile;
+    iuser.framenr = tpage->lastframe;
+    if (BKE_image_has_ibuf(tpage, &iuser)) {
+      PrepareImageEntry *e = MEM_new<PrepareImageEntry>("PrepareImageEntry");
+      e->ima = tpage;
+      e->iuser = iuser;
+      BLI_addtail(&used_images, e);
+      ps->image_tot++;
+    }
+    else {
+      image_index = -1;
+    }
+  }
+
+  state.ima = tpage;
+  state.tile = tile;
+  state.image_index = image_index;
+  return image_index;
+}
+
 static void project_paint_prepare_all_faces(ProjPaintState *ps,
                                             MemArena *arena,
                                             const ProjPaintFaceLookup *face_lookup,
                                             ProjPaintLayerClone *layer_clone,
-                                            const float2 *uv_map_base)
+                                            const float2 *uv_map_base,
+                                            const bool is_multi_view)
 {
   const bke::AttributeAccessor attributes = ps->mesh_eval->attributes();
   const StringRef active_uv_name = ps->mesh_eval->active_uv_map_name();
   /* Image Vars - keep track of images we have used */
   ListBaseT<PrepareImageEntry> used_images = {nullptr};
 
-  Image *tpage_last = nullptr, *tpage;
+  PrepareImageState image_state;
+  Image *tpage;
   TexPaintSlot *slot_last = nullptr;
   TexPaintSlot *slot = nullptr;
-  int tile_last = -1, tile;
-  int image_index = -1, tri_index;
+  int tile;
+  int tri_index;
   int prev_poly = -1;
   const Span<int3> corner_tris = ps->corner_tris_eval;
   const Span<int> tri_faces = ps->corner_tri_faces_eval;
@@ -4587,7 +4639,22 @@ static void project_paint_prepare_all_faces(ProjPaintState *ps,
     if (skip_tri || project_paint_clone_face_skip(ps, layer_clone, slot, tri_index)) {
       continue;
     }
-    if (is_face_paintable && tpage) {
+
+    if (!is_face_paintable || !tpage) {
+      continue;
+    }
+
+    int image_index = -1;
+
+    /* With symmetry, prepare images regardless of culling as `projImages` is shared between
+     * passes and a face culled in this pass may not be culled in another, see !164840. */
+    if (is_multi_view) {
+      image_index = project_paint_prepare_image_index(ps, used_images, tpage, tile, image_state);
+    }
+
+    /* Skip culled faces, these aren't added to `bucketFaces`,
+     * see #project_paint_delayed_face_init() below. */
+    {
       ProjPaintFaceCoSS coSS;
       proj_paint_face_coSS_init(ps, corner_tris[tri_index], &coSS);
 
@@ -4631,44 +4698,16 @@ static void project_paint_prepare_all_faces(ProjPaintState *ps,
           }
         }
       }
+    }
 
-      if (tpage_last != tpage || tile_last != tile) {
-        image_index = 0;
-        for (PrepareImageEntry *e = static_cast<PrepareImageEntry *>(used_images.first); e;
-             e = e->next, image_index++)
-        {
-          if (e->ima == tpage && e->iuser.tile == tile) {
-            break;
-          }
-        }
+    if (!is_multi_view) {
+      image_index = project_paint_prepare_image_index(ps, used_images, tpage, tile, image_state);
+    }
 
-        if (image_index == ps->image_tot) {
-          /* XXX get appropriate ImageUser instead */
-          ImageUser iuser;
-          BKE_imageuser_default(&iuser);
-          iuser.tile = tile;
-          iuser.framenr = tpage->lastframe;
-          if (BKE_image_has_ibuf(tpage, &iuser)) {
-            PrepareImageEntry *e = MEM_new<PrepareImageEntry>("PrepareImageEntry");
-            e->ima = tpage;
-            e->iuser = iuser;
-            BLI_addtail(&used_images, e);
-            ps->image_tot++;
-          }
-          else {
-            image_index = -1;
-          }
-        }
-
-        tpage_last = tpage;
-        tile_last = tile;
-      }
-
-      if (image_index != -1) {
-        /* Initialize the faces screen pixels */
-        /* Add this to a list to initialize later */
-        project_paint_delayed_face_init(ps, corner_tris[tri_index], tri_index);
-      }
+    if (image_index != -1) {
+      /* Initialize the faces screen pixels */
+      /* Add this to a list to initialize later */
+      project_paint_delayed_face_init(ps, corner_tris[tri_index], tri_index);
     }
   }
 
@@ -4682,7 +4721,10 @@ static void project_paint_prepare_all_faces(ProjPaintState *ps,
 }
 
 /* run once per stroke before projection painting */
-static void project_paint_begin(const bContext *C, ProjPaintState *ps, const char symmetry_flag)
+static void project_paint_begin(const bContext *C,
+                                ProjPaintState *ps,
+                                const bool is_multi_view,
+                                const char symmetry_flag)
 {
   ProjPaintLayerClone layer_clone;
   ProjPaintFaceLookup face_lookup;
@@ -4792,7 +4834,8 @@ static void project_paint_begin(const bContext *C, ProjPaintState *ps, const cha
 
   proj_paint_state_vert_flags_init(ps);
 
-  project_paint_prepare_all_faces(ps, arena, &face_lookup, &layer_clone, uv_map_base);
+  project_paint_prepare_all_faces(
+      ps, arena, &face_lookup, &layer_clone, uv_map_base, is_multi_view);
 }
 
 static void paint_proj_begin_clone(ProjPaintState *ps, const float mouse[2])
@@ -5649,7 +5692,7 @@ static void do_projectpaint_thread(TaskPool *__restrict /*pool*/, void *ph_v)
 
             /* Color texture (alpha used as mask). */
             if (ps->is_texbrush) {
-              const MTex *mtex = BKE_brush_color_texture_get(brush, OB_MODE_TEXTURE_PAINT);
+              const MTex *mtex = BKE_brush_color_texture_get(brush, PaintMode::Texture3D);
               float3 samplecos;
               float4 texrgba;
 
@@ -5960,7 +6003,6 @@ static bool project_paint_op(void *state, const float lastpos[2], const float po
       const int3 &tri = ps->corner_tris_eval[tri_index];
       const int vert_tri[3] = {PS_CORNER_TRI_AS_VERT_INDEX_3(ps, tri)};
       float world[3];
-      bke::PaintRuntime *paint_runtime = ps->paint->runtime;
 
       interp_v3_v3v3v3(world,
                        ps->vert_positions_eval[vert_tri[0]],
@@ -5968,10 +6010,8 @@ static bool project_paint_op(void *state, const float lastpos[2], const float po
                        ps->vert_positions_eval[vert_tri[2]],
                        w);
 
-      paint_runtime->average_stroke_counter++;
       mul_m4_v3(ps->obmat, world);
-      add_v3_v3(paint_runtime->average_stroke_accum, world);
-      paint_runtime->last_stroke_valid = true;
+      bke::paint::stroke_track_location(*ps->paint, world);
     }
   }
 
@@ -6230,7 +6270,7 @@ void *paint_proj_new_stroke(bContext *C,
   ps_handle->brush = BKE_paint_brush(&settings->imapaint.paint);
 
   if (BKE_brush_color_jitter_get_settings(&settings->imapaint.paint, ps_handle->brush)) {
-    ps_handle->initial_hsv_jitter = seed_hsv_jitter();
+    ps_handle->initial_hsv_jitter = BKE_paint_seed_hsv_jitter();
   }
 
   if (mode == BrushStrokeMode::Invert) {
@@ -6245,8 +6285,9 @@ void *paint_proj_new_stroke(bContext *C,
   ps_handle->orig_brush_size = BKE_brush_size_get(ps_handle->paint, ps_handle->brush);
 
   Mesh *mesh = BKE_mesh_from_object(ob);
-  ps_handle->symmetry_flags = mesh->symmetry;
+  ps_handle->symmetry_flags = mesh->symmetry & ME_SYMMETRY_XYZ;
   ps_handle->ps_views_tot = 1 + (pow_i(2, count_bits_i(ps_handle->symmetry_flags)) - 1);
+  const bool is_multi_view = (ps_handle->ps_views_tot != 1);
 
   for (int i = 0; i < ps_handle->ps_views_tot; i++) {
     ProjPaintState *ps = MEM_new<ProjPaintState>("ProjectionPaintState");
@@ -6303,10 +6344,12 @@ void *paint_proj_new_stroke(bContext *C,
       PROJ_PAINT_STATE_SHARED_MEMCPY(ps, ps_handle->ps_views[0]);
     }
 
-    project_paint_begin(C, ps, symmetry_flag_views[i]);
+    project_paint_begin(C, ps, is_multi_view, symmetry_flag_views[i]);
     if (ps->mesh_eval == nullptr) {
       goto fail;
     }
+    /* Shared views index into the first view's `projImages`. */
+    BLI_assert(ps->image_tot == ps_handle->ps_views[0]->image_tot);
 
     paint_proj_begin_clone(ps, mouse);
   }
@@ -6343,7 +6386,7 @@ void paint_proj_redraw(const bContext *C, void *ps_handle_p, bool final)
   }
 }
 
-void paint_proj_stroke_done(void *ps_handle_p)
+void paint_proj_stroke_done(void *ps_handle_p, wmPaintCursor *cursor)
 {
   ProjStrokeHandle *ps_handle = static_cast<ProjStrokeHandle *>(ps_handle_p);
 
@@ -6368,6 +6411,9 @@ void paint_proj_stroke_done(void *ps_handle_p)
   }
 
   MEM_delete(ps_handle);
+  if (cursor) {
+    WM_paint_cursor_end(cursor);
+  }
 }
 /* use project paint to re-apply an image */
 static wmOperatorStatus texture_paint_camera_project_exec(bContext *C, wmOperator *op)
@@ -6454,7 +6500,7 @@ static wmOperatorStatus texture_paint_camera_project_exec(bContext *C, wmOperato
   scene.toolsettings->imapaint.flag |= IMAGEPAINT_DRAWING;
 
   /* allocate and initialize spatial data structures */
-  project_paint_begin(C, &ps, 0);
+  project_paint_begin(C, &ps, false, 0);
 
   if (ps.mesh_eval == nullptr) {
     BKE_brush_size_set(ps.paint, ps.brush, orig_brush_size);
@@ -6559,7 +6605,7 @@ static wmOperatorStatus texture_paint_image_from_view_exec(bContext *C, wmOperat
 
   /* Create a copy of the overlays where they are all turned off, except the
    * texture paint overlay opacity */
-  View3D *v3d = static_cast<View3D *>(area->spacedata.first);
+  View3D *v3d = area->spacedata.first_as<View3D>();
   View3D v3d_copy = dna::shallow_copy(*v3d);
   v3d_copy.gridflag = eView3D_GridFlag{};
   v3d_copy.flag2 = eView3D_Flag2{};
@@ -6643,9 +6689,9 @@ void PAINT_OT_image_from_view(wmOperatorType *ot)
       ot->srna, "filepath", nullptr, FILE_MAX, "File Path", "Name of the file");
 }
 
-/*********************************************
- * Data generation for projective texturing  *
- * *******************************************/
+/* -------------------------------------------------------------------- */
+/** \name Data Generation for Projective Texturing
+ * \{ */
 
 void ED_paint_data_warning(
     ReportList *reports, bool has_uvs, bool has_mat, bool has_tex, bool has_stencil)
@@ -6760,7 +6806,12 @@ bool ED_paint_proj_mesh_data_check(Scene &scene,
   return has_uvs && has_mat && has_tex && has_stencil;
 }
 
-/* Add layer operator */
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Add Texture Paint Slot Operator
+ * \{ */
+
 enum {
   LAYER_BASE_COLOR,
   LAYER_SPECULAR,
@@ -7272,6 +7323,12 @@ void PAINT_OT_add_texture_paint_slot(wmOperatorType *ot)
                "Type of data stored in attribute");
 }
 
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Add Simple UVs Operator
+ * \{ */
+
 static wmOperatorStatus add_simple_uvs_exec(bContext *C, wmOperator * /*op*/)
 {
   /* no checks here, poll function does them for us */
@@ -7313,5 +7370,7 @@ void PAINT_OT_add_simple_uvs(wmOperatorType *ot)
   /* flags */
   ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
 }
+
+/** \} */
 
 }  // namespace blender

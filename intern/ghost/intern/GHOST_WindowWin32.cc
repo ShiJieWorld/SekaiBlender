@@ -45,8 +45,8 @@
 
 namespace {
 
-constexpr char kSekaiBlenderWinAppID[] = "sekaiblender.1.0";
-constexpr char kSekaiBlenderWinAppName[] = "SekaiBlender 1.0";
+constexpr char kSekaiBlenderWinAppID[] = "sekaiblender.1.0.1";
+constexpr char kSekaiBlenderWinAppName[] = "SekaiBlender 1.0.1";
 
 }  // namespace
 
@@ -632,7 +632,7 @@ GHOST_Context *GHOST_WindowWin32::newDrawingContext(GHOST_TDrawingContextType ty
 #ifdef WITH_VULKAN_BACKEND
     case GHOST_kDrawingContextTypeVulkan: {
       GHOST_Context *context = new GHOST_ContextVK(
-          want_context_params_, h_wnd_, 1, 2, preferred_device_, &hdr_info_);
+          want_context_params_, h_wnd_, 1, 1, preferred_device_, &hdr_info_);
       if (context->initializeDrawingContext()) {
         return context;
       }

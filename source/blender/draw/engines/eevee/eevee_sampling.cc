@@ -298,6 +298,15 @@ void Sampling::step()
       data_.dimensions[SAMPLING_FILM_U + i] = float(x);
     }
   }
+  {
+    /* Separate sequence for panoramic film sample jittering. */
+    double2 r, offset = {0, 0};
+    uint64_t leap = 4;
+    uint2 primes = {5, 7};
+    BLI_halton_2d(primes, offset, sample_ * leap + 1, r);
+    data_.dimensions[SAMPLING_PANORAMIC_U] = r[0];
+    data_.dimensions[SAMPLING_PANORAMIC_V] = r[1];
+  }
 
   for (int i : IndexRange(SAMPLING_DIMENSION_COUNT)) {
     /* These numbers are often fed to `sqrt`. Make sure their values are in the expected range. */

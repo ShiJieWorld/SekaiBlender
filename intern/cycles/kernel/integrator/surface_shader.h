@@ -213,7 +213,7 @@ ccl_device_inline void surface_shader_prepare_closures(KernelGlobals kg,
 
       /* NOTE: this is a sufficient condition. If `blur_roughness < THRESH < original_roughness`
        * then the flag was already set. */
-      if (!roughness_is_almost_specular(blur_roughness, blur_roughness)) {
+      if (!alpha_is_almost_specular(blur_roughness, blur_roughness)) {
         sd->runtime_flag |= SR_BSDF_HAS_EVAL;
       }
     }
@@ -386,14 +386,13 @@ ccl_device
 #else
 ccl_device_inline
 #endif
-    float
-    surface_shader_bsdf_eval(KernelGlobals kg,
-                             ccl_attr_maybe_unused IntegratorState state,
-                             ccl_private ShaderData *sd,
-                             const float3 wo,
-                             ccl_private BsdfEval *bsdf_eval,
-                             const uint light_shader_flags,
-                             ccl_private float &r_avg_roughness_squared)
+    float surface_shader_bsdf_eval(KernelGlobals kg,
+                                   ccl_attr_maybe_unused IntegratorState state,
+                                   ccl_private ShaderData *sd,
+                                   const float3 wo,
+                                   ccl_private BsdfEval *bsdf_eval,
+                                   const uint light_shader_flags,
+                                   ccl_private float &r_avg_roughness_squared)
 {
   bsdf_eval_init(bsdf_eval, zero_spectrum());
 
@@ -1078,7 +1077,7 @@ ccl_device Spectrum surface_shader_diffuse(KernelGlobals kg, const ccl_private S
     const ccl_private ShaderClosure *sc = &sd->closure[i];
 
     if (CLOSURE_IS_BSDF_DIFFUSE(sc->type) || CLOSURE_IS_BSSRDF(sc->type)) {
-      eval += bsdf_albedo(kg, sd, sc, true, true);
+      eval += closure_albedo(kg, sd, sc, true, true);
     }
   }
 
@@ -1093,7 +1092,7 @@ ccl_device Spectrum surface_shader_glossy(KernelGlobals kg, const ccl_private Sh
     const ccl_private ShaderClosure *sc = &sd->closure[i];
 
     if (CLOSURE_IS_BSDF_GLOSSY(sc->type) || CLOSURE_IS_GLASS(sc->type)) {
-      eval += bsdf_albedo(kg, sd, sc, true, false);
+      eval += closure_albedo(kg, sd, sc, true, false);
     }
   }
 
@@ -1108,7 +1107,7 @@ ccl_device Spectrum surface_shader_transmission(KernelGlobals kg, const ccl_priv
     const ccl_private ShaderClosure *sc = &sd->closure[i];
 
     if (CLOSURE_IS_BSDF_TRANSMISSION(sc->type) || CLOSURE_IS_GLASS(sc->type)) {
-      eval += bsdf_albedo(kg, sd, sc, false, true);
+      eval += closure_albedo(kg, sd, sc, false, true);
     }
   }
 
@@ -1251,7 +1250,7 @@ ccl_device Spectrum surface_shader_apply_holdout(ccl_private ShaderData *sd)
 
 /* Surface Evaluation */
 
-template<uint node_feature_mask, typename ConstIntegratorGenericState>
+template<uint64_t node_feature_mask, typename ConstIntegratorGenericState>
 ccl_device void surface_shader_eval(KernelGlobals kg,
                                     ConstIntegratorGenericState state,
                                     ccl_private ShaderData *ccl_restrict sd,

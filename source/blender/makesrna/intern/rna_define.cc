@@ -94,15 +94,15 @@ void rna_addtail(ListBase *listbase, void *vlink)
   Link *link = static_cast<Link *>(vlink);
 
   link->next = nullptr;
-  link->prev = static_cast<Link *>(listbase->last);
+  link->prev = static_cast<Link *>(listbase->last_);
 
-  if (listbase->last) {
-    (static_cast<Link *>(listbase->last))->next = link;
+  if (listbase->last_) {
+    (static_cast<Link *>(listbase->last_))->next = link;
   }
-  if (listbase->first == nullptr) {
-    listbase->first = link;
+  if (listbase->first_ == nullptr) {
+    listbase->first_ = link;
   }
-  listbase->last = link;
+  listbase->last_ = link;
 }
 
 static void rna_remlink(ListBase *listbase, void *vlink)
@@ -116,11 +116,11 @@ static void rna_remlink(ListBase *listbase, void *vlink)
     link->prev->next = link->next;
   }
 
-  if (listbase->last == link) {
-    listbase->last = link->prev;
+  if (listbase->last_ == link) {
+    listbase->last_ = link->prev;
   }
-  if (listbase->first == link) {
-    listbase->first = link->next;
+  if (listbase->first_ == link) {
+    listbase->first_ = link->next;
   }
 }
 
@@ -134,12 +134,12 @@ void rna_freelistN(ListBase *listbase)
 {
   Link *link, *next;
 
-  for (link = static_cast<Link *>(listbase->first); link; link = next) {
+  for (link = static_cast<Link *>(listbase->first_); link; link = next) {
     next = link->next;
     MEM_delete(link);
   }
 
-  listbase->first = listbase->last = nullptr;
+  listbase->first_ = listbase->last_ = nullptr;
 }
 
 static void rna_brna_structs_add(BlenderRNA *brna, std::unique_ptr<StructRNA> srna_ptr)
@@ -185,7 +185,7 @@ StructDefRNA *rna_find_struct_def(StructRNA *srna)
 {
   StructDefRNA *dsrna;
 
-  dsrna = static_cast<StructDefRNA *>(DefRNA.structs.last);
+  dsrna = DefRNA.structs.last();
   for (; dsrna; dsrna = static_cast<StructDefRNA *>(dsrna->cont.prev)) {
     if (dsrna->srna == srna) {
       return dsrna;
@@ -201,16 +201,16 @@ PropertyDefRNA *rna_find_struct_property_def(StructRNA *srna, PropertyRNA *prop)
   PropertyDefRNA *dprop;
 
   dsrna = rna_find_struct_def(srna);
-  dprop = static_cast<PropertyDefRNA *>(dsrna->cont.properties.last);
+  dprop = dsrna->cont.properties.last();
   for (; dprop; dprop = dprop->prev) {
     if (dprop->prop == prop) {
       return dprop;
     }
   }
 
-  dsrna = static_cast<StructDefRNA *>(DefRNA.structs.last);
+  dsrna = DefRNA.structs.last();
   for (; dsrna; dsrna = static_cast<StructDefRNA *>(dsrna->cont.prev)) {
-    dprop = static_cast<PropertyDefRNA *>(dsrna->cont.properties.last);
+    dprop = dsrna->cont.properties.last();
     for (; dprop; dprop = dprop->prev) {
       if (dprop->prop == prop) {
         return dprop;
@@ -227,16 +227,16 @@ FunctionDefRNA *rna_find_function_def(FunctionRNA *func)
   FunctionDefRNA *dfunc;
 
   dsrna = rna_find_struct_def(DefRNA.laststruct);
-  dfunc = static_cast<FunctionDefRNA *>(dsrna->functions.last);
+  dfunc = dsrna->functions.last();
   for (; dfunc; dfunc = static_cast<FunctionDefRNA *>(dfunc->cont.prev)) {
     if (dfunc->func == func) {
       return dfunc;
     }
   }
 
-  dsrna = static_cast<StructDefRNA *>(DefRNA.structs.last);
+  dsrna = DefRNA.structs.last();
   for (; dsrna; dsrna = static_cast<StructDefRNA *>(dsrna->cont.prev)) {
-    dfunc = static_cast<FunctionDefRNA *>(dsrna->functions.last);
+    dfunc = dsrna->functions.last();
     for (; dfunc; dfunc = static_cast<FunctionDefRNA *>(dfunc->cont.prev)) {
       if (dfunc->func == func) {
         return dfunc;
@@ -254,9 +254,9 @@ PropertyDefRNA *rna_find_parameter_def(PropertyRNA *parm)
   PropertyDefRNA *dparm;
 
   dsrna = rna_find_struct_def(DefRNA.laststruct);
-  dfunc = static_cast<FunctionDefRNA *>(dsrna->functions.last);
+  dfunc = dsrna->functions.last();
   for (; dfunc; dfunc = static_cast<FunctionDefRNA *>(dfunc->cont.prev)) {
-    dparm = static_cast<PropertyDefRNA *>(dfunc->cont.properties.last);
+    dparm = dfunc->cont.properties.last();
     for (; dparm; dparm = dparm->prev) {
       if (dparm->prop == parm) {
         return dparm;
@@ -264,11 +264,11 @@ PropertyDefRNA *rna_find_parameter_def(PropertyRNA *parm)
     }
   }
 
-  dsrna = static_cast<StructDefRNA *>(DefRNA.structs.last);
+  dsrna = DefRNA.structs.last();
   for (; dsrna; dsrna = static_cast<StructDefRNA *>(dsrna->cont.prev)) {
-    dfunc = static_cast<FunctionDefRNA *>(dsrna->functions.last);
+    dfunc = dsrna->functions.last();
     for (; dfunc; dfunc = static_cast<FunctionDefRNA *>(dfunc->cont.prev)) {
-      dparm = static_cast<PropertyDefRNA *>(dfunc->cont.properties.last);
+      dparm = dfunc->cont.properties.last();
       for (; dparm; dparm = dparm->prev) {
         if (dparm->prop == parm) {
           return dparm;
@@ -365,8 +365,11 @@ static bool rna_find_sdna_member(const StringRef structname,
     }
 
     /* Recursive into nested members. */
+    const void *nested_default_data = nullptr;
     if (remainder.startswith(".")) {
+      /* Nested struct, offset into parent default. */
       remainder = remainder.drop_known_prefix(".");
+      nested_default_data = rna_default_data(struct_idx, member_idx, base_default_data);
     }
     else if (remainder.startswith("->")) {
       remainder = remainder.drop_known_prefix("->");
@@ -377,10 +380,7 @@ static bool rna_find_sdna_member(const StringRef structname,
 
     /* The return value for nested structs is ignored, to allow recursing into
      * runtime structs not covered by DNA. */
-    rna_find_sdna_member(pm.type_name,
-                         remainder,
-                         r_dp,
-                         rna_default_data(struct_idx, member_idx, base_default_data));
+    rna_find_sdna_member(pm.type_name, remainder, r_dp, nested_default_data);
     return true;
   }
 
@@ -423,28 +423,42 @@ static RnaDnaTypeInfo rna_dnatype_primitive_info(const StringRef dnatype)
 
 #endif /* !RNA_RUNTIME */
 
+/**
+ * List is from:
+ * \code{.py}
+ * ", ".join([
+ *     '"%s"' % kw for kw in __import__("keyword").kwlist
+ *     if kw not in {"False", "None", "True"}
+ * ])
+ * \endcode
+ *
+ * See also: http://docs.python.org/py3k/reference/lexical_analysis.html#keywords.
+ */
+constexpr const char *PYTHON_KEYWORDS[] = {
+    /* "False", "None", "True", */
+    "and",    "as",   "assert", "async",  "await",    "break", "class", "continue", "def",
+    "del",    "elif", "else",   "except", "finally",  "for",   "from",  "global",   "if",
+    "import", "in",   "is",     "lambda", "nonlocal", "not",   "or",    "pass",     "raise",
+    "return", "try",  "while",  "with",   "yield",    nullptr,
+};
+
+/**
+ * Not keywords, but reserved all the same because they are standard python property/accessor
+ * names.
+ */
+constexpr const char *PYTHON_KEYWORDS_PROPERTIES[] = {
+    "keys",
+    "values",
+    "items",
+    "get",
+    nullptr,
+};
+
 bool RNA_validate_identifier(const char *identifier, bool is_property, const char **r_error)
 {
   int a = 0;
 
-  /**
-   * List is from:
-   * \code{.py}
-   * ", ".join([
-   *     '"%s"' % kw for kw in __import__("keyword").kwlist
-   *     if kw not in {"False", "None", "True"}
-   * ])
-   * \endcode
-   */
-  static const char *kwlist[] = {
-      /* "False", "None", "True", */
-      "and",    "as",   "assert", "async",  "await",    "break", "class", "continue", "def",
-      "del",    "elif", "else",   "except", "finally",  "for",   "from",  "global",   "if",
-      "import", "in",   "is",     "lambda", "nonlocal", "not",   "or",    "pass",     "raise",
-      "return", "try",  "while",  "with",   "yield",    nullptr,
-  };
-
-  if (!isalpha(identifier[0])) {
+  if (!isalpha(identifier[0]) && identifier[0] != '_') {
     if (r_error) {
       *r_error = "first character failed isalpha() check";
     }
@@ -482,8 +496,8 @@ bool RNA_validate_identifier(const char *identifier, bool is_property, const cha
     }
   }
 
-  for (a = 0; kwlist[a]; a++) {
-    if (STREQ(identifier, kwlist[a])) {
+  for (a = 0; PYTHON_KEYWORDS[a]; a++) {
+    if (STREQ(identifier, PYTHON_KEYWORDS[a])) {
       if (r_error) {
         *r_error = "this keyword is reserved by Python";
       }
@@ -492,17 +506,8 @@ bool RNA_validate_identifier(const char *identifier, bool is_property, const cha
   }
 
   if (is_property) {
-    static const char *kwlist_prop[] = {
-        /* not keywords but reserved all the same because py uses */
-        "keys",
-        "values",
-        "items",
-        "get",
-        nullptr,
-    };
-
-    for (a = 0; kwlist_prop[a]; a++) {
-      if (STREQ(identifier, kwlist_prop[a])) {
+    for (a = 0; PYTHON_KEYWORDS_PROPERTIES[a]; a++) {
+      if (STREQ(identifier, PYTHON_KEYWORDS_PROPERTIES[a])) {
         if (r_error) {
           *r_error = "this keyword is reserved by Python";
         }
@@ -516,18 +521,13 @@ bool RNA_validate_identifier(const char *identifier, bool is_property, const cha
 
 void RNA_identifier_sanitize(char *identifier, bool is_property)
 {
+  if (identifier[0] == '\0') {
+    return;
+  }
+
   int a = 0;
 
-  /* List from: http://docs.python.org/py3k/reference/lexical_analysis.html#keywords */
-  static const char *kwlist[] = {
-      /* "False", "None", "True", */
-      "and",    "as",     "assert", "break",   "class",    "continue", "def",    "del",
-      "elif",   "else",   "except", "finally", "for",      "from",     "global", "if",
-      "import", "in",     "is",     "lambda",  "nonlocal", "not",      "or",     "pass",
-      "raise",  "return", "try",    "while",   "with",     "yield",    nullptr,
-  };
-
-  if (!isalpha(identifier[0])) {
+  if (!isalpha(identifier[0]) && identifier[0] != '_') {
     /* first character failed isalpha() check */
     identifier[0] = '_';
   }
@@ -557,31 +557,20 @@ void RNA_identifier_sanitize(char *identifier, bool is_property)
     }
   }
 
-  for (a = 0; kwlist[a]; a++) {
-    if (STREQ(identifier, kwlist[a])) {
-      /* this keyword is reserved by python.
-       * just replace the last character by '_' to keep it readable.
-       */
+  for (a = 0; PYTHON_KEYWORDS[a]; a++) {
+    if (STREQ(identifier, PYTHON_KEYWORDS[a])) {
+      /* This keyword is reserved by python.
+       * Just replace the last character by '_' to keep it readable. */
       identifier[strlen(identifier) - 1] = '_';
       break;
     }
   }
 
   if (is_property) {
-    static const char *kwlist_prop[] = {
-        /* not keywords but reserved all the same because py uses */
-        "keys",
-        "values",
-        "items",
-        "get",
-        nullptr,
-    };
-
-    for (a = 0; kwlist_prop[a]; a++) {
-      if (STREQ(identifier, kwlist_prop[a])) {
-        /* this keyword is reserved by python.
-         * just replace the last character by '_' to keep it readable.
-         */
+    for (a = 0; PYTHON_KEYWORDS_PROPERTIES[a]; a++) {
+      if (STREQ(identifier, PYTHON_KEYWORDS_PROPERTIES[a])) {
+        /* This keyword is reserved by python.
+         * Just replace the last character by '_' to keep it readable. */
         identifier[strlen(identifier) - 1] = '_';
         break;
       }
@@ -621,10 +610,8 @@ void RNA_define_free(BlenderRNA * /*brna*/)
   }
   rna_freelistN(&DefRNA.allocs);
 
-  for (ds = static_cast<StructDefRNA *>(DefRNA.structs.first); ds;
-       ds = static_cast<StructDefRNA *>(ds->cont.next))
-  {
-    for (dfunc = static_cast<FunctionDefRNA *>(ds->functions.first); dfunc;
+  for (ds = DefRNA.structs.first(); ds; ds = static_cast<StructDefRNA *>(ds->cont.next)) {
+    for (dfunc = ds->functions.first(); dfunc;
          dfunc = static_cast<FunctionDefRNA *>(dfunc->cont.next))
     {
       rna_freelistN(&dfunc->cont.properties);
@@ -701,7 +688,7 @@ void RNA_struct_free(BlenderRNA *brna, StructRNA *srna)
     }
   }
   MEM_SAFE_DELETE(srna->cont.prop_lookup_set);
-  for (prop = static_cast<PropertyRNA *>(srna->cont.properties.first); prop; prop = nextprop) {
+  for (prop = srna->cont.properties.first(); prop; prop = nextprop) {
     nextprop = prop->next;
 
     RNA_def_property_free_pointers(prop);
@@ -712,7 +699,7 @@ void RNA_struct_free(BlenderRNA *brna, StructRNA *srna)
   }
 
   for (const std::unique_ptr<FunctionRNA> &func : srna->functions) {
-    for (parm = static_cast<PropertyRNA *>(func->cont.properties.first); parm; parm = nextparm) {
+    for (parm = func->cont.properties.first(); parm; parm = nextparm) {
       nextparm = parm->next;
 
       RNA_def_property_free_pointers(parm);
@@ -794,9 +781,7 @@ static StructDefRNA *rna_find_def_struct(StructRNA *srna)
 {
   StructDefRNA *ds;
 
-  for (ds = static_cast<StructDefRNA *>(DefRNA.structs.first); ds;
-       ds = static_cast<StructDefRNA *>(ds->cont.next))
-  {
+  for (ds = DefRNA.structs.first(); ds; ds = static_cast<StructDefRNA *>(ds->cont.next)) {
     if (ds->srna == srna) {
       return ds;
     }
@@ -1929,8 +1914,8 @@ void RNA_def_property_enum_items(PropertyRNA *prop, const EnumPropertyItem *item
           if (!type_info.is_integer) {
             CLOG_ERROR(&LOG,
                        "\"%s.%s\", enum type \"%s\" size is not known.",
-                       srna->identifier,
-                       prop->identifier,
+                       srna->identifier.c_str(),
+                       prop->identifier.c_str(),
                        dp->dnatype.c_str());
           }
           else {
@@ -3128,7 +3113,7 @@ void RNA_def_property_poll_runtime(PropertyRNA *prop, const void *func)
     ((PointerPropertyRNA *)prop)->poll = (PropPointerPollFunc)func;
   }
   else {
-    CLOG_ERROR(&LOG, "%s is not a Pointer Property.", prop->identifier);
+    CLOG_ERROR(&LOG, "%s is not a Pointer Property.", prop->identifier.c_str());
   }
 }
 
@@ -4700,9 +4685,10 @@ FunctionRNA *RNA_def_function(StructRNA *srna, const char *identifier_c_str, con
 
   const UString identifier(identifier_c_str);
 
-  if (std::find_if(srna->functions.begin(), srna->functions.end(), [&](const auto &func) {
-        return func->identifier == identifier;
-      }) != srna->functions.end())
+  if (std::find_if(srna->functions.begin(),
+                   srna->functions.end(),
+                   [&](const auto &func) { return func->identifier == identifier; }) !=
+      srna->functions.end())
   {
     CLOG_ERROR(&LOG, "%s.%s already defined.", srna->identifier.c_str(), identifier.c_str());
     return nullptr;
@@ -5171,9 +5157,7 @@ static void rna_def_property_free(StructOrFunctionRNA *cont_, PropertyRNA *prop)
 static PropertyRNA *rna_def_property_find_py_id(ContainerRNA *cont, const char *identifier_c_str)
 {
   const UString identifier(identifier_c_str);
-  for (PropertyRNA *prop = static_cast<PropertyRNA *>(cont->properties.first); prop;
-       prop = prop->next)
-  {
+  for (PropertyRNA *prop = cont->properties.first(); prop; prop = prop->next) {
     if (prop->identifier == identifier) {
       return prop;
     }

@@ -1,3 +1,8 @@
+# Rin / local agent runtime state
+.dsh-memory/
+.rin/
+rin-*.exe
+
 # generic files to ignore
 .*
 

@@ -376,7 +376,7 @@ bNodeTree *ensure_edge_preview_node_group(Main *bmain)
   if (ID *existing = BKE_libblock_find_name(bmain, ID_NT, kMMDEdgePreviewNodeGroup)) {
     bNodeTree *group = reinterpret_cast<bNodeTree *>(existing);
     /* Reuse a previously built group, exactly like mmd_tools does. */
-    if (group->nodes.first != nullptr) {
+    if (group->nodes.first() != nullptr) {
       return group;
     }
   }
@@ -554,7 +554,7 @@ bNodeTree *ensure_basic_toon_node_group(Main *bmain)
   }
   if (ID *existing = BKE_libblock_find_name(bmain, ID_NT, kBasicToonNodeGroup)) {
     bNodeTree *group = reinterpret_cast<bNodeTree *>(existing);
-    if (group->nodes.first != nullptr) {
+    if (group->nodes.first() != nullptr) {
       return group;
     }
   }
@@ -1058,7 +1058,7 @@ void apply_agx_high_contrast(Scene *scene)
 
 void clear_node_tree(Main *bmain, bNodeTree &ntree)
 {
-  while (bNode *node = static_cast<bNode *>(ntree.nodes.first)) {
+  while (bNode *node = static_cast<bNode *>(ntree.nodes.first())) {
     bke::node_remove_node(bmain, ntree, *node, true);
   }
 }

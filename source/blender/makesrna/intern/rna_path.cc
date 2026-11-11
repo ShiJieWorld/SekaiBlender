@@ -215,6 +215,9 @@ std::optional<ParsedRNAPath<N>> ParsedRNAPath<N>::from_string(const StringRefNul
       else {
         const int64_t index = atoi(token);
         if (index == 0 && (token[0] != '0' || token[1] != '\0')) {
+          if (buffer != token) {
+            MEM_delete(token);
+          }
           return std::nullopt;
         }
         parsed->items.append(rna_path::LookupIndex(index));
@@ -340,14 +343,14 @@ static bool rna_path_parse(const PointerRNA *ptr,
       nextptr.invalidate();
     }
 
-    if (!curptr.data) {
+    if (!curptr) {
       return false;
     }
 
     /* look up property name in current struct */
     prop = nullptr;
     if (const auto *member = std::get_if<rna_path::Member>(item_iter)) {
-      prop = RNA_struct_find_property(&curptr, member->identifier.c_str());
+      prop = RNA_struct_find_property(&curptr, member->identifier);
     }
     else if (const auto *lookup_key = std::get_if<rna_path::LookupKey>(item_iter)) {
       IDProperty *group = RNA_struct_idprops(&curptr, false);
@@ -539,7 +542,7 @@ bool RNA_path_resolve(const PointerRNA *ptr,
     return false;
   }
 
-  return r_ptr->data != nullptr;
+  return *r_ptr;
 }
 
 bool RNA_path_resolve_full(
@@ -556,7 +559,7 @@ bool RNA_path_resolve_full(
     return false;
   }
 
-  return r_ptr->data != nullptr;
+  return *r_ptr;
 }
 
 bool RNA_path_resolve_full_maybe_null(
@@ -588,7 +591,7 @@ bool RNA_path_resolve_property(const PointerRNA *ptr,
     return false;
   }
 
-  return r_ptr->data != nullptr && *r_prop != nullptr;
+  return *r_ptr && *r_prop != nullptr;
 }
 
 bool RNA_path_resolve_property(const PointerRNA *ptr,
@@ -600,7 +603,7 @@ bool RNA_path_resolve_property(const PointerRNA *ptr,
     return false;
   }
 
-  return r_ptr->data != nullptr && *r_prop != nullptr;
+  return *r_ptr && *r_prop != nullptr;
 }
 
 bool RNA_path_resolve_property_full(
@@ -617,7 +620,7 @@ bool RNA_path_resolve_property_full(
     return false;
   }
 
-  return r_ptr->data != nullptr && *r_prop != nullptr;
+  return *r_ptr && *r_prop != nullptr;
 }
 
 bool RNA_path_resolve_property_and_item_pointer(const PointerRNA *ptr,
@@ -637,7 +640,7 @@ bool RNA_path_resolve_property_and_item_pointer(const PointerRNA *ptr,
     return false;
   }
 
-  return r_ptr->data != nullptr && *r_prop != nullptr;
+  return *r_ptr && *r_prop != nullptr;
 }
 
 bool RNA_path_resolve_property_and_item_pointer_full(const PointerRNA *ptr,
@@ -658,7 +661,7 @@ bool RNA_path_resolve_property_and_item_pointer_full(const PointerRNA *ptr,
     return false;
   }
 
-  return r_ptr->data != nullptr && *r_prop != nullptr;
+  return *r_ptr && *r_prop != nullptr;
 }
 bool RNA_path_resolve_elements(PointerRNA *ptr,
                                const char *path,
@@ -900,7 +903,7 @@ static char *rna_idp_path(PointerRNA *ptr,
   link.name = nullptr;
   link.index = -1;
 
-  for (iter = static_cast<IDProperty *>(haystack->data.group.first); iter; iter = iter->next) {
+  for (iter = haystack->data.group.first(); iter; iter = iter->next) {
     if (needle == iter) { /* found! */
       link.name = iter->name;
       link.index = -1;
@@ -930,7 +933,7 @@ static char *rna_idp_path(PointerRNA *ptr,
     if (iter->type == IDP_GROUP) {
       if (prop->type == PROP_POINTER) {
         PointerRNA child_ptr = RNA_property_pointer_get(ptr, prop);
-        if (RNA_pointer_is_null(&child_ptr)) {
+        if (!child_ptr) {
           /* Pointer ID prop might be a 'leaf' in the IDProp group hierarchy, in which case a null
            * value is perfectly valid. Just means it won't match the searched needle. */
           continue;
@@ -957,7 +960,7 @@ static char *rna_idp_path(PointerRNA *ptr,
         for (j = 0; j < iter->len; j++, array++) {
           PointerRNA child_ptr;
           if (RNA_property_collection_lookup_int(ptr, prop, j, &child_ptr)) {
-            if (RNA_pointer_is_null(&child_ptr)) {
+            if (!child_ptr) {
               /* Array item ID prop might be a 'leaf' in the IDProp group hierarchy, in which case
                * a null value is perfectly valid. Just means it won't match the searched needle. */
               continue;
@@ -1076,7 +1079,7 @@ std::optional<std::string> RNA_path_from_ID_to_struct(const PointerRNA *ptr)
 {
   std::optional<std::string> ptrpath;
 
-  if (!ptr->owner_id || !ptr->data) {
+  if (!ptr->has_owner_id() || !*ptr) {
     return std::nullopt;
   }
 
@@ -1150,7 +1153,7 @@ static void rna_path_array_multi_string_from_flat_index(const PointerRNA *ptr,
                                                         int index_dim,
                                                         int index,
                                                         char *index_str,
-                                                        int index_str_len)
+                                                        int index_str_maxncpy)
 {
   int dimsize[RNA_MAX_ARRAY_LENGTH];
   int totdims = RNA_property_array_dimension(ptr, prop, dimsize);
@@ -1158,9 +1161,9 @@ static void rna_path_array_multi_string_from_flat_index(const PointerRNA *ptr,
 
   rna_path_array_multi_from_flat_index(dimsize, totdims, index_dim, index, index_multi);
 
-  for (int i = 0, offset = 0; (i < index_dim) && (offset < index_str_len); i++) {
+  for (int i = 0, offset = 0; (i < index_dim) && (offset < index_str_maxncpy); i++) {
     offset += BLI_snprintf_rlen(
-        &index_str[offset], index_str_len - offset, "[%d]", index_multi[i]);
+        &index_str[offset], index_str_maxncpy - offset, "[%d]", index_multi[i]);
   }
 }
 
@@ -1219,7 +1222,7 @@ std::optional<std::string> RNA_path_from_ID_to_property_index(const PointerRNA *
                                                               int index_dim,
                                                               int index)
 {
-  if (!ptr->owner_id || !ptr->data) {
+  if (!ptr->has_owner_id() || !*ptr) {
     return std::nullopt;
   }
   /* Path from ID to the struct holding this property. */

@@ -22,10 +22,10 @@ BEGIN
   BEGIN
     BLOCK "04090000"
     BEGIN
-      VALUE "FileVersion", "1.0"
-      VALUE "ProductVersion", "1.0"
+      VALUE "FileVersion", "1.0.1"
+      VALUE "ProductVersion", "1.0.1"
       VALUE "CompanyName", "SekaiBlender"
-      VALUE "FileDescription", "SekaiBlender 1.0"
+      VALUE "FileDescription", "SekaiBlender 1.0.1"
       VALUE "LegalCopyright", "GPLv3 (Blender Foundation)"
       VALUE "OriginalFilename", "SekaiBlender.exe"
       VALUE "ProductName", "SekaiBlender"
