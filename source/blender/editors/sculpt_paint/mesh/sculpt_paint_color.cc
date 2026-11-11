@@ -143,6 +143,17 @@ float4 color_vert_get(const OffsetIndices<int> faces,
   return color;
 }
 
+float4 color_corner_get(const GSpan color_attribute, int corner_index)
+{
+  float4 r_color;
+  to_static_color_type(color_attribute.type(), [&](auto dummy) {
+    using T = decltype(dummy);
+    const T *colors_typed = static_cast<const T *>(color_attribute.data());
+    r_color = to_float(colors_typed[corner_index]);
+  });
+  return r_color;
+}
+
 void color_vert_set(const OffsetIndices<int> faces,
                     const Span<int> corner_verts,
                     const GroupedSpan<int> vert_to_face_map,
@@ -289,7 +300,7 @@ static void do_color_smooth_task(const Depsgraph &depsgraph,
 
   auto_mask::calc_vert_factors(depsgraph, object, cache.automasking.get(), node, verts, factors);
 
-  calc_brush_texture_factors(ss, brush, vert_positions, verts, factors);
+  calc_brush_texture_factors(PaintMode::Sculpt, ss, brush, vert_positions, verts, factors);
   scale_factors(factors, cache.bstrength);
 
   tls.colors.resize(verts.size());
@@ -375,7 +386,13 @@ static void do_paint_brush_task(const Depsgraph &depsgraph,
   const MutableSpan<float> distances = tls.distances;
   if (BKE_brush_has_cube_tip(&brush, PaintMode::Sculpt)) {
     tls.positions.resize(verts.size());
-    calc_local_positions(vert_positions, verts, mat, tls.positions);
+    calc_local_positions(vert_positions,
+                         verts,
+                         mat,
+                         cache.location_symm,
+                         cache.view_normal_symm,
+                         eBrushFalloffShape(brush.falloff_shape),
+                         tls.positions);
     calc_brush_cube_distances<float3>(brush, tls.positions, distances);
     radius = 1.0f;
   }
@@ -401,7 +418,7 @@ static void do_paint_brush_task(const Depsgraph &depsgraph,
     scale_factors(factors, auto_mask);
   }
 
-  calc_brush_texture_factors(ss, brush, vert_positions, verts, factors);
+  calc_brush_texture_factors(PaintMode::Sculpt, ss, brush, vert_positions, verts, factors);
   scale_factors(factors, bstrength);
 
   const float density = ss.cache->paint_brush.density;
@@ -435,7 +452,8 @@ static void do_paint_brush_task(const Depsgraph &depsgraph,
 
   const Span<float4> orig_colors = orig_color_data_get_mesh(object, node);
 
-  MutableSpan<float4> color_buffer = gather_data_mesh(mix_colors.as_span(), verts, tls.mix_colors);
+  Array<float4, bke::pbvh::MESH_LEAF_LIMIT> color_buffer(verts.size());
+  gather_data_mesh(mix_colors.as_span(), verts, color_buffer.as_mutable_span());
 
   if (brush.flag & BRUSH_USE_GRADIENT) {
     switch (brush.gradient_stroke_mode) {
@@ -551,16 +569,10 @@ static void do_sample_wet_paint_task(const Depsgraph &depsgraph,
 }
 
 void do_paint_brush(const Depsgraph &depsgraph,
-                    PaintModeSettings &paint_mode_settings,
                     const Sculpt &sd,
                     Object &ob,
-                    const IndexMask &node_mask,
-                    const IndexMask &texnode_mask)
+                    const IndexMask &node_mask)
 {
-  if (SCULPT_use_image_paint_brush(paint_mode_settings, ob)) {
-    SCULPT_do_paint_brush_image(depsgraph, sd, ob, texnode_mask);
-    return;
-  }
   PRF_scope(ProfileCategory::Editor);
 
   const Brush &brush = *BKE_paint_brush_for_read(&sd.paint);
@@ -572,18 +584,14 @@ void do_paint_brush(const Depsgraph &depsgraph,
     ss.cache->paint_brush.density_seed = BLI_hash_int_01(ss.cache->location_symm[0] * 1000);
   }
 
-  if (stroke_is_first_brush_step_of_symmetry_pass(*ss.cache)) {
-    return;
-  }
-
   float4x4 mat;
 
   /* If the brush is round the tip does not need to be aligned to the surface, so this saves a
    * whole iteration over the affected nodes. */
   if (BKE_brush_has_cube_tip(&brush, PaintMode::Sculpt)) {
-    cube_tip_init(sd, ob, brush, mat.ptr());
+    mat = cube_tip_init(ob, brush);
 
-    if (is_zero_m4(mat.ptr())) {
+    if (math::is_zero(mat)) {
       return;
     }
   }
@@ -718,7 +726,7 @@ static void do_smear_brush_task(const Depsgraph &depsgraph,
 
   auto_mask::calc_vert_factors(depsgraph, object, cache.automasking.get(), node, verts, factors);
 
-  calc_brush_texture_factors(ss, brush, vert_positions, verts, factors);
+  calc_brush_texture_factors(PaintMode::Sculpt, ss, brush, vert_positions, verts, factors);
   scale_factors(factors, strength);
 
   float3 brush_delta;
@@ -933,10 +941,6 @@ void do_blur_brush(const Depsgraph &depsgraph,
 
   if (!ss.cache->paint_brush.density_seed) {
     ss.cache->paint_brush.density_seed = BLI_hash_int_01(ss.cache->location_symm[0] * 1000);
-  }
-
-  if (stroke_is_first_brush_step_of_symmetry_pass(*ss.cache)) {
-    return;
   }
 
   Mesh &mesh = *id_cast<Mesh *>(ob.data);

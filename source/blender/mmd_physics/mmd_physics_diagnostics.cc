@@ -13,16 +13,23 @@
 #include <cstdio>
 #include <cstring>
 #include <map>
+#include <set>
 #include <string>
 #include <system_error>
+#include <tuple>
+#include <utility>
 
 #include "BKE_appdir.hh"
+#include "BKE_collection.hh"
+#include "BKE_customdata.hh"
 #include "BKE_deform.hh"
 #include "BKE_main.hh"
 #include "BKE_mesh.hh"
+#include "BKE_modifier.hh"
 #include "BKE_object.hh"
 
 #include "BLI_fileops.hh"
+#include "BLI_hash_md5.hh"
 #include "BLI_listbase.hh"
 #include "BLI_math_matrix_c.hh"
 #include "BLI_math_vector_c.hh"
@@ -32,15 +39,43 @@
 #include "BLI_string.hh"
 #include "BLI_vector.hh"
 
+#include "DEG_depsgraph.hh"
 #include "DEG_depsgraph_query.hh"
 
+#include "DNA_layer_types.h"
+#include "DNA_customdata_types.h"
 #include "DNA_mesh_types.h"
 #include "DNA_meshdata_types.h"
+#include "DNA_modifier_types.h"
 #include "DNA_object_types.h"
 
 namespace blender::mmd_physics {
 
 namespace {
+
+struct MeshSamplingStats {
+  bool enabled = false;
+  int mesh_object_count = 0;
+  int eligible_mesh_object_count = 0;
+  int mesh_objects_with_vertex_groups = 0;
+  int evaluated_mesh_object_count = 0;
+  int bind_pose_mesh_object_count = 0;
+  int evaluated_mesh_failure_count = 0;
+  int topology_mismatch_count = 0;
+  int requested_bone_count = 0;
+  int matched_bone_count = 0;
+  int sampled_bone_count = 0;
+  int selected_vertex_count = 0;
+  int sampled_step_count = 0;
+  uint64_t vertex_test_count = 0;
+  uint64_t nonpenetrating_count = 0;
+  uint64_t penetration_sample_count = 0;
+  uint64_t emitted_record_count = 0;
+  std::vector<std::string> sampled_mesh_objects;
+  std::string status = "disabled";
+  std::string reason = "mesh_sampling_not_requested";
+  std::string pose_mode = "not_applicable";
+};
 
 bool float3_is_finite(const std::array<float, 3> &value)
 {
@@ -53,6 +88,25 @@ uint32_t float_bits(const float value)
   static_assert(sizeof(bits) == sizeof(value));
   memcpy(&bits, &value, sizeof(bits));
   return bits;
+}
+
+std::string string_list_hash(const std::vector<std::string> &values)
+{
+  std::vector<std::string> sorted_values = values;
+  std::sort(sorted_values.begin(), sorted_values.end());
+  sorted_values.erase(std::unique(sorted_values.begin(), sorted_values.end()), sorted_values.end());
+  std::string identity;
+  for (const std::string &value : sorted_values) {
+    identity += std::to_string(value.size());
+    identity += ':';
+    identity += value;
+    identity += ';';
+  }
+  unsigned char digest[16];
+  char hex_digest[33];
+  BLI_hash_md5_buffer(identity.data(), identity.size(), digest);
+  BLI_hash_md5_to_hexdigest(digest, hex_digest);
+  return hex_digest;
 }
 
 void write_json_string(FILE *file, const std::string &value)
@@ -106,6 +160,23 @@ void write_json_float(FILE *file, const float value)
   char buffer[32];
   const auto result = std::to_chars(
       buffer, buffer + sizeof(buffer), value, std::chars_format::general, 9);
+  if (result.ec == std::errc()) {
+    fwrite(buffer, 1, size_t(result.ptr - buffer), file);
+  }
+  else {
+    fputs("null", file);
+  }
+}
+
+void write_json_double(FILE *file, const double value)
+{
+  if (!std::isfinite(value)) {
+    fputs("null", file);
+    return;
+  }
+  char buffer[64];
+  const auto result = std::to_chars(
+      buffer, buffer + sizeof(buffer), value, std::chars_format::general, 17);
   if (result.ec == std::errc()) {
     fwrite(buffer, 1, size_t(result.ptr - buffer), file);
   }
@@ -310,27 +381,30 @@ void write_contact(FILE *file, const MMDDiagnosticContactSample &contact)
 
 void write_mesh_sample(FILE *file, const MMDDiagnosticMeshSample &sample)
 {
-  fputs("{\"bone\":", file);
+  fputs("{\"bone_name\":", file);
   write_json_string(file, sample.bone_name);
-  fprintf(file, ",\"vertex\":%d,\"position\":", sample.vertex_index);
+  fputs(",\"mesh_object_name\":", file);
+  write_json_string(file, sample.mesh_object_name);
+  fprintf(file, ",\"vertex_index\":%d,\"position_world\":", sample.vertex_index);
   write_float3(file, sample.position_world);
-  fputs(",\"inside_body\":", file);
+  fputs(",\"inside_body_index\":", file);
   fprintf(file, "%d,\"inside_body_bone\":", sample.inside_body_index);
   write_json_string(file, sample.inside_body_bone);
   fputs(",\"penetration_depth\":", file);
   write_json_float(file, sample.penetration_depth);
-  fputc('}', file);
+  fputs(",\"penetration_metric\":\"aabb_nearest_face_containment\"}", file);
 }
 
 void write_frame(FILE *file, const MMDDiagnosticFrame &frame)
 {
   fprintf(file,
-          "{\"step\":%d,\"runtime\":{\"timer_elapsed\":%.17g,"
-          "\"accumulator\":%.17g,\"fixed_steps\":%d,"
-          "\"total_fixed_steps\":%llu,\"writeback\":%s},\"bodies\":[",
-          frame.step,
-          frame.runtime_timer_elapsed,
-          frame.runtime_accumulator,
+          "{\"step\":%d,\"runtime\":{\"timer_elapsed\":",
+          frame.step);
+  write_json_double(file, frame.runtime_timer_elapsed);
+  fputs(",\"accumulator\":", file);
+  write_json_double(file, frame.runtime_accumulator);
+  fprintf(file,
+          ",\"fixed_steps\":%d,\"total_fixed_steps\":%llu,\"writeback\":%s},\"bodies\":[",
           frame.runtime_fixed_steps,
           static_cast<unsigned long long>(frame.runtime_total_fixed_steps),
           frame.runtime_writeback ? "true" : "false");
@@ -376,17 +450,11 @@ bool create_output_paths(Object *armature,
                          std::string &r_jsonl_path,
                          std::string &r_summary_path)
 {
-  char safe_name[MAX_ID_NAME];
-  BLI_strncpy(safe_name, armature->id.name + 2, sizeof(safe_name));
-  if (safe_name[0] == '\0') {
-    BLI_strncpy(safe_name, "Armature", sizeof(safe_name));
-  }
-  BLI_path_make_safe_filename(safe_name);
-
-  char variant[208];
+  const std::string mesh_bone_hash = string_list_hash(options.mesh_sample_bones);
+  char variant[256];
   snprintf(variant,
            sizeof(variant),
-           "g_%08x_%08x_%08x_i_%08x_hz_%08x_n_%08x_p_%08x_c_%d_s_%d_d_%08x_x_%08x",
+           "g_%08x_%08x_%08x_i_%08x_hz_%08x_n_%08x_p_%08x_u_%08x_q_%d_c_%d_s_%d_d_%08x_x_%08x_m_%s_%08x_%08x",
            unsigned(float_bits(options.gravity[0])),
            unsigned(float_bits(options.gravity[1])),
            unsigned(float_bits(options.gravity[2])),
@@ -394,14 +462,26 @@ bool create_output_paths(Object *armature,
            unsigned(options.fixed_step_hz),
            unsigned(options.steps),
            unsigned(options.startup_prewarm_steps),
+           unsigned(options.startup_sync_steps),
+           int(options.capture_initial_state),
            int(options.disable_rigid_body_contacts),
            int(options.disable_joint_springs),
            unsigned(float_bits(options.joint_spring_damping)),
-           unsigned(options.joint_collision_exclusion_depth));
+           unsigned(options.joint_collision_exclusion_depth),
+           mesh_bone_hash.c_str(),
+           unsigned(options.mesh_sample_interval),
+           unsigned(options.mesh_max_vertices_per_bone));
   char jsonl_name[FILE_MAXFILE];
   char summary_name[FILE_MAXFILE];
-  snprintf(jsonl_name, sizeof(jsonl_name), "%s_%s_latest.jsonl", safe_name, variant);
-  snprintf(summary_name, sizeof(summary_name), "%s_%s_latest_summary.json", safe_name, variant);
+  /* Compact identity avoids filesystem component truncation for long model names.
+   * MD5 is a stable local filename identity, not a security/provenance claim. */
+  const std::string capture_hash = string_list_hash(
+      {std::string(armature->id.name + 2), std::string(variant), "r27_level_a"});
+  snprintf(jsonl_name, sizeof(jsonl_name), "capture_%s_latest.jsonl", capture_hash.c_str());
+  snprintf(summary_name,
+           sizeof(summary_name),
+           "capture_%s_latest_summary.json",
+           capture_hash.c_str());
 
   char jsonl_path[FILE_MAX];
   char summary_path[FILE_MAX];
@@ -430,6 +510,9 @@ bool write_summary(const std::string &path,
                    const int captured_steps,
                    const int body_count,
                    const int joint_count,
+                   const int first_step,
+                   const int last_step,
+                   const MeshSamplingStats &mesh_stats,
                    const std::string &jsonl_path)
 {
   FILE *file = BLI_fopen(path.c_str(), "wb");
@@ -441,18 +524,34 @@ bool write_summary(const std::string &path,
         "\"blender_z_up\",\"capture_kind\":\"objective_physics_state\",\"jsonl_path\":",
         file);
   write_json_string(file, jsonl_path);
+  fputs(",\"canonical_mesh_keys\":[\"bone_name\",\"mesh_object_name\",\"vertex_index\","
+        "\"position_world\",\"inside_body_index\",\"inside_body_bone\","
+        "\"penetration_depth\",\"penetration_metric\"]", file);
   fprintf(file,
-          ",\"captured_steps\":%d,\"body_count\":%d,\"joint_count\":%d,"
+          ",\"schema_revision\":\"r27_level_a\",\"frame_count\":%d,\"physical_step_count\":%d",
+          captured_steps + (options.capture_initial_state ? 1 : 0),
+          captured_steps);
+  fprintf(file,
+          ",\"captured_steps\":%d,"
+          "\"first_step\":%d,\"last_step\":%d,"
+          "\"physical_first_step\":%d,\"physical_last_step\":%d,"
+          "\"body_count\":%d,\"joint_count\":%d,"
           "\"simulation\":{\"startup_timestep_hz\":30,\"startup_prewarm_steps\":%d,"
+          "\"startup_sync_steps\":%d,"
           "\"recording_mode\":\"isolated_fixed_step_no_pose_feedback\"},"
           "\"options\":{\"fixed_step_hz\":%d,\"requested_steps\":%d,"
           "\"solver_iterations\":%d,\"disable_rigid_body_contacts\":%s,"
           "\"disable_joint_springs\":%s,\"joint_collision_exclusion_depth\":%d,"
           "\"joint_spring_damping\":",
           captured_steps,
+          first_step,
+          last_step,
+          captured_steps > 0 ? 0 : -1,
+          captured_steps > 0 ? captured_steps - 1 : -1,
           body_count,
           joint_count,
           options.startup_prewarm_steps,
+          options.startup_sync_steps,
           options.fixed_step_hz,
           options.steps,
           options.solver_iterations,
@@ -460,7 +559,8 @@ bool write_summary(const std::string &path,
           options.disable_joint_springs ? "true" : "false",
           options.joint_collision_exclusion_depth);
   write_json_float(file, options.joint_spring_damping);
-  fputs(",\"gravity\":", file);
+  fprintf(file, ",\"capture_initial_state\":%s,\"gravity\":",
+          options.capture_initial_state ? "true" : "false");
   write_float3(file, options.gravity);
   fputs(",\"mesh_sample\":{\"bones\":[", file);
   for (size_t i = 0; i < options.mesh_sample_bones.size(); i++) {
@@ -470,9 +570,48 @@ bool write_summary(const std::string &path,
     write_json_string(file, options.mesh_sample_bones[i]);
   }
   fprintf(file,
-          "],\"interval\":%d,\"max_per_bone\":%d}}}\n",
+          "],\"interval\":%d,\"max_per_bone\":%d}},"
+          "\"mesh_sampling\":{\"enabled\":%s,\"mesh_object_count\":%d,"
+          "\"eligible_mesh_object_count\":%d,\"mesh_objects_with_vertex_groups\":%d,"
+          "\"evaluated_mesh_object_count\":%d,\"bind_pose_mesh_object_count\":%d,"
+          "\"evaluated_mesh_failure_count\":%d,\"topology_mismatch_count\":%d,"
+          "\"requested_bone_count\":%d,\"matched_bone_count\":%d,"
+          "\"sampled_bone_count\":%d,\"selected_vertex_count\":%d,\"sampled_step_count\":%d,"
+          "\"vertex_test_count\":%llu,\"nonpenetrating_count\":%llu,"
+          "\"penetration_sample_count\":%llu,\"emitted_record_count\":%llu,\"status\":",
           options.mesh_sample_interval,
-          options.mesh_max_vertices_per_bone);
+          options.mesh_max_vertices_per_bone,
+          mesh_stats.enabled ? "true" : "false",
+          mesh_stats.mesh_object_count,
+          mesh_stats.eligible_mesh_object_count,
+          mesh_stats.mesh_objects_with_vertex_groups,
+          mesh_stats.evaluated_mesh_object_count,
+          mesh_stats.bind_pose_mesh_object_count,
+          mesh_stats.evaluated_mesh_failure_count,
+          mesh_stats.topology_mismatch_count,
+          mesh_stats.requested_bone_count,
+          mesh_stats.matched_bone_count,
+          mesh_stats.sampled_bone_count,
+          mesh_stats.selected_vertex_count,
+          mesh_stats.sampled_step_count,
+          static_cast<unsigned long long>(mesh_stats.vertex_test_count),
+          static_cast<unsigned long long>(mesh_stats.nonpenetrating_count),
+          static_cast<unsigned long long>(mesh_stats.penetration_sample_count),
+          static_cast<unsigned long long>(mesh_stats.emitted_record_count));
+  write_json_string(file, mesh_stats.status);
+  fputs(",\"reason\":", file);
+  write_json_string(file, mesh_stats.reason);
+  fputs(",\"pose_mode\":", file);
+  write_json_string(file, mesh_stats.pose_mode);
+  fputs(",\"penetration_metric\":\"aabb_nearest_face_containment\","
+        "\"sampled_mesh_objects\":[", file);
+  for (size_t i = 0; i < mesh_stats.sampled_mesh_objects.size(); i++) {
+    if (i != 0) {
+      fputc(',', file);
+    }
+    write_json_string(file, mesh_stats.sampled_mesh_objects[i]);
+  }
+  fputs("]}}\n", file);
 
   const bool write_ok = ferror(file) == 0;
   const bool close_ok = fclose(file) == 0;
@@ -557,6 +696,7 @@ bool recover_interrupted_publication(const std::string &jsonl_path,
  * the diagnostic capture does not feed physics back into the pose. */
 struct MeshSampleVertex {
   std::string bone_name;
+  std::string mesh_object_name;
   int vertex_index = -1;
   std::array<float, 3> blender_position{};
 };
@@ -564,157 +704,285 @@ struct MeshSampleVertex {
 struct MeshSampleSet {
   bool valid = false;
   std::vector<MeshSampleVertex> vertices;
+  MeshSamplingStats stats;
 };
 
-Object *find_mesh_object_for_armature(Main *bmain, Object *armature)
+bool mesh_is_bound_to_armature(const Object &mesh_obj, const Object &armature)
 {
-  if (bmain == nullptr || armature == nullptr) {
-    return nullptr;
+  if (mesh_obj.parent == &armature) {
+    return true;
   }
-  for (Object &obj_ref : bmain->objects) {
-    Object *obj = &obj_ref;
-    if (obj->type == OB_MESH && obj->parent == armature) {
-      return obj;
+  for (const ModifierData *md = static_cast<const ModifierData *>(mesh_obj.modifiers.first());
+       md != nullptr;
+       md = md->next)
+  {
+    if (md->type != eModifierType_Armature) {
+      continue;
+    }
+    const ArmatureModifierData *armature_md = reinterpret_cast<const ArmatureModifierData *>(md);
+    if (armature_md->object == &armature) {
+      return true;
     }
   }
-  return nullptr;
+  return false;
+}
+
+/* A vertex-index identity proof is required before pairing source deform
+ * weights with evaluated positions. A missing CD_ORIGINDEX is safe only when
+ * every enabled modifier is known to preserve mesh topology. Unknown or
+ * constructive modifiers are rejected rather than silently pairing by index. */
+bool evaluated_mesh_preserves_vertex_identity(const Object &mesh_obj,
+                                               const Depsgraph *depsgraph,
+                                               const Mesh &evaluated_mesh)
+{
+  const int *origindex = static_cast<const int *>(
+      CustomData_get_layer(&evaluated_mesh.vert_data, CD_ORIGINDEX));
+  if (origindex != nullptr) {
+    for (const int vi : evaluated_mesh.vert_positions().index_range()) {
+      if (origindex[vi] != vi) {
+        return false;
+      }
+    }
+    return true;
+  }
+  if (depsgraph == nullptr || (mesh_obj.mode & OB_MODE_EDIT) != 0) {
+    return false;
+  }
+  const int required_mode = DEG_get_mode(depsgraph) == DAG_EVAL_RENDER ? eModifierMode_Render :
+                                                                      eModifierMode_Realtime;
+  for (const ModifierData *md = static_cast<const ModifierData *>(mesh_obj.modifiers.first());
+       md != nullptr;
+       md = md->next)
+  {
+    if ((md->mode & required_mode) == 0) {
+      continue;
+    }
+    const ModifierTypeInfo *modifier_type = BKE_modifier_get_info(md->type);
+    if (modifier_type == nullptr || modifier_type->type != ModifierTypeType::OnlyDeform) {
+      return false;
+    }
+  }
+  return true;
 }
 
 /* Build the pre-selected vertex set. Output volume is strictly bounded:
+ *   - Only meshes in the selected model collection and bound to the armature are considered.
  *   - Only vertices whose top-weight bone is in `sample_bones` are considered.
- *   - Per bone, at most `max_per_bone` vertices are selected (uniform stride).
+ *   - Per bone, at most `max_per_bone` vertices are selected across the whole model.
  *   - Positions are precomputed in Blender space so per-step sampling is cheap.
- * Returns a set with `valid=false` if no matching vertices were found. */
-MeshSampleSet build_mesh_sample_set(Main *bmain,
+ *   - A depsgraph capture rejects evaluated meshes whose topology/deformation
+ *     data cannot be matched to the source vertex identity; it does not silently
+ *     remap changed topology. */
+MeshSampleSet build_mesh_sample_set(Collection *model_collection,
                                     Depsgraph *depsgraph,
                                     Object *armature,
                                     const std::vector<std::string> &sample_bones,
                                     int max_per_bone)
 {
   MeshSampleSet set;
-  if (sample_bones.empty() || armature == nullptr || bmain == nullptr) {
+  set.stats.enabled = !sample_bones.empty();
+  set.stats.requested_bone_count = int(std::set<std::string>(sample_bones.begin(),
+                                                             sample_bones.end())
+                                           .size());
+  if (!set.stats.enabled) {
+    return set;
+  }
+  set.stats.pose_mode = "not_applicable";
+  if (armature == nullptr || model_collection == nullptr) {
+    set.stats.status = "not_run";
+    set.stats.reason = "no_model_collection_or_armature";
     return set;
   }
   if (max_per_bone < 1) {
     max_per_bone = 1;
   }
 
-  Object *mesh_obj = find_mesh_object_for_armature(bmain, armature);
-  if (mesh_obj == nullptr) {
-    return set;
-  }
-
-  const Mesh *mesh = nullptr;
-  if (depsgraph != nullptr) {
-    const Object *eval_obj = DEG_get_evaluated(depsgraph, mesh_obj);
-    if (eval_obj != nullptr) {
-      mesh = BKE_object_get_evaluated_mesh(eval_obj);
-    }
-  }
-  if (mesh == nullptr) {
-    mesh = reinterpret_cast<const Mesh *>(mesh_obj->data);
-  }
-  if (mesh == nullptr) {
-    return set;
-  }
-
-  /* Map bone name -> vertex group index. MMD models use vertex group
-   * names that match bone names exactly. */
-  std::map<std::string, int> bone_to_vg_index;
-  const ListBaseT<bDeformGroup> *defbase = BKE_object_defgroup_list(mesh_obj);
-  if (defbase != nullptr) {
-    int idx = 0;
-    for (const bDeformGroup &dg_ref : *defbase) {
-      const bDeformGroup *dg = &dg_ref;
-      for (const std::string &bone : sample_bones) {
-        if (dg->name == bone) {
-          bone_to_vg_index[bone] = idx;
-          break;
-        }
-      }
-      idx++;
-    }
-  }
-  if (bone_to_vg_index.empty()) {
-    return set;
-  }
-
-  const Span<float3> positions = mesh->vert_positions();
-  const Span<MDeformVert> dverts = mesh->deform_verts();
-  if (positions.is_empty() || dverts.is_empty()) {
-    return set;
-  }
-
-  /* Collect all vertices whose top-weight bone is in sample_bones,
-   * grouped by bone name. */
-  std::map<std::string, std::vector<int>> bone_to_all_vertices;
-  for (const int vi : dverts.index_range()) {
-    const MDeformVert &dv = dverts[vi];
-    if (dv.dw == nullptr || dv.totweight == 0) {
+  std::vector<Object *> mesh_objects;
+  std::set<Object *> seen_objects;
+  FOREACH_COLLECTION_OBJECT_RECURSIVE_BEGIN (model_collection, object) {
+    if (object == nullptr || object->type != OB_MESH || !seen_objects.insert(object).second) {
       continue;
     }
-    /* Find top-weight vertex group. */
-    int top_idx = 0;
-    float top_weight = dv.dw[0].weight;
-    for (int j = 1; j < dv.totweight; j++) {
-      if (dv.dw[j].weight > top_weight) {
-        top_weight = dv.dw[j].weight;
-        top_idx = j;
-      }
-    }
-    const int vg_idx = dv.dw[top_idx].def_nr;
-
-    /* Check if this vg_idx matches any sampled bone. */
-    for (const auto &pair : bone_to_vg_index) {
-      if (vg_idx == pair.second) {
-        bone_to_all_vertices[pair.first].push_back(vi);
-        break;
-      }
-    }
+    mesh_objects.push_back(object);
   }
+  FOREACH_COLLECTION_OBJECT_RECURSIVE_END;
+  std::sort(mesh_objects.begin(), mesh_objects.end(), [](const Object *a, const Object *b) {
+    const char *a_name = a->id.name + 2;
+    const char *b_name = b->id.name + 2;
+    return std::strcmp(a_name, b_name) < 0;
+  });
+  set.stats.mesh_object_count = int(mesh_objects.size());
 
-  /* Precompute world-space Blender position for the selected vertices. */
-  const float(*obj_mat)[4] = mesh_obj->object_to_world().ptr();
+  const std::set<std::string> requested_bones(sample_bones.begin(), sample_bones.end());
+  std::set<std::string> matched_bones;
+  std::map<std::string, std::vector<MeshSampleVertex>> candidates_by_bone;
 
-  for (const std::string &bone : sample_bones) {
-    auto it = bone_to_all_vertices.find(bone);
-    if (it == bone_to_all_vertices.end()) {
-      continue;
-    }
-    const std::vector<int> &verts = it->second;
-    const int total = int(verts.size());
-    if (total == 0) {
+  for (Object *mesh_obj : mesh_objects) {
+    if (!mesh_is_bound_to_armature(*mesh_obj, *armature) ||
+        !BKE_collection_has_object_recursive(model_collection, mesh_obj))
+    {
       continue;
     }
 
-    /* Uniform stride selection: pick at most max_per_bone vertices. */
-    std::vector<int> selected;
-    if (total <= max_per_bone) {
-      selected = verts;
+    const Object *eval_obj = mesh_obj;
+    const Mesh *source_mesh = reinterpret_cast<const Mesh *>(mesh_obj->data);
+    const Mesh *mesh = source_mesh;
+    if (source_mesh == nullptr) {
+      set.stats.evaluated_mesh_failure_count++;
+      continue;
+    }
+    if (depsgraph != nullptr) {
+      const Object *evaluated = DEG_get_evaluated(depsgraph, mesh_obj);
+      const bool evaluated_ready = evaluated != nullptr && evaluated != mesh_obj &&
+                                   DEG_is_evaluated(evaluated) &&
+                                   DEG_object_geometry_is_evaluated(*evaluated) &&
+                                   DEG_object_transform_is_evaluated(*evaluated);
+      const Mesh *evaluated_mesh = evaluated_ready ? BKE_object_get_evaluated_mesh(evaluated) :
+                                                    nullptr;
+      if (evaluated_mesh == nullptr) {
+        set.stats.evaluated_mesh_failure_count++;
+        continue;
+      }
+      eval_obj = evaluated;
+      mesh = evaluated_mesh;
+      set.stats.evaluated_mesh_object_count++;
     }
     else {
-      const int stride = total / max_per_bone;
-      for (int i = 0; i < max_per_bone && i * stride < total; i++) {
-        selected.push_back(verts[i * stride]);
+      set.stats.bind_pose_mesh_object_count++;
+    }
+    set.stats.eligible_mesh_object_count++;
+
+    std::map<int, std::string> vg_to_bone;
+    /* Preserve source vertex identity: source deform weights and group names are
+     * paired with evaluated positions only after the vertex count check below. */
+    const ListBaseT<bDeformGroup> *defbase = BKE_object_defgroup_list(mesh_obj);
+    if (defbase != nullptr) {
+      int group_index = 0;
+      for (const bDeformGroup &group_ref : *defbase) {
+        const bDeformGroup *group = &group_ref;
+        if (requested_bones.find(group->name) != requested_bones.end()) {
+          vg_to_bone.emplace(group_index, group->name);
+          matched_bones.insert(group->name);
+        }
+        group_index++;
       }
     }
+    if (vg_to_bone.empty()) {
+      continue;
+    }
+    set.stats.mesh_objects_with_vertex_groups++;
 
-    for (const int vi : selected) {
+    const Span<float3> positions = mesh->vert_positions();
+    const Span<MDeformVert> dverts = source_mesh->deform_verts();
+    if (positions.is_empty() || dverts.is_empty()) {
+      continue;
+    }
+    if (int(positions.size()) != source_mesh->verts_num || dverts.size() != positions.size()) {
+      /* Level A retains source vertex identity; changed topology is not silently remapped. */
+      set.stats.topology_mismatch_count++;
+      continue;
+    }
+    if (depsgraph != nullptr &&
+        !evaluated_mesh_preserves_vertex_identity(*eval_obj, depsgraph, *mesh)) {
+      set.stats.topology_mismatch_count++;
+      continue;
+    }
+    const float(*obj_mat)[4] = eval_obj->object_to_world().ptr();
+    const std::string mesh_name = mesh_obj->id.name + 2;
+    for (const int vi : dverts.index_range()) {
       if (vi < 0 || vi >= int(positions.size())) {
+        continue;
+      }
+      const MDeformVert &dv = dverts[vi];
+      if (dv.dw == nullptr || dv.totweight == 0) {
+        continue;
+      }
+      int top_index = 0;
+      float top_weight = dv.dw[0].weight;
+      for (int weight_index = 1; weight_index < dv.totweight; weight_index++) {
+        if (dv.dw[weight_index].weight > top_weight) {
+          top_weight = dv.dw[weight_index].weight;
+          top_index = weight_index;
+        }
+      }
+      const auto bone_it = vg_to_bone.find(dv.dw[top_index].def_nr);
+      if (bone_it == vg_to_bone.end()) {
         continue;
       }
       const float3 &co = positions[vi];
       float world[3];
       mul_v3_m4v3(world, obj_mat, co);
-      MeshSampleVertex sv;
-      sv.bone_name = bone;
-      sv.vertex_index = vi;
-      sv.blender_position = {world[0], world[1], world[2]};
-      set.vertices.push_back(std::move(sv));
+      MeshSampleVertex sample;
+      sample.bone_name = bone_it->second;
+      sample.mesh_object_name = mesh_name;
+      sample.vertex_index = vi;
+      sample.blender_position = {world[0], world[1], world[2]};
+      candidates_by_bone[sample.bone_name].push_back(std::move(sample));
     }
   }
 
+  set.stats.matched_bone_count = int(matched_bones.size());
+  if (depsgraph == nullptr) {
+    set.stats.pose_mode = "single_bind_pose";
+  }
+  else if (set.stats.evaluated_mesh_failure_count > 0 || set.stats.topology_mismatch_count > 0) {
+    set.stats.pose_mode = set.stats.evaluated_mesh_object_count > 0 ?
+                              "single_evaluated_pose_with_rejected_meshes" :
+                              "evaluated_pose_unavailable";
+  }
+  else {
+    set.stats.pose_mode = "single_evaluated_pose";
+  }
+  for (const std::string &bone : requested_bones) {
+    auto candidates_it = candidates_by_bone.find(bone);
+    if (candidates_it == candidates_by_bone.end() || candidates_it->second.empty()) {
+      continue;
+    }
+    set.stats.sampled_bone_count++;
+    std::vector<MeshSampleVertex> &candidates = candidates_it->second;
+    std::sort(candidates.begin(), candidates.end(), [](const MeshSampleVertex &a,
+                                                       const MeshSampleVertex &b) {
+      return std::tie(a.bone_name, a.mesh_object_name, a.vertex_index) <
+             std::tie(b.bone_name, b.mesh_object_name, b.vertex_index);
+    });
+    if (int(candidates.size()) <= max_per_bone) {
+      set.vertices.insert(set.vertices.end(), candidates.begin(), candidates.end());
+    }
+    else if (max_per_bone == 1) {
+      set.vertices.push_back(candidates.front());
+    }
+    else {
+      const int total = int(candidates.size());
+      for (int i = 0; i < max_per_bone; i++) {
+        const int index = int((int64_t(i) * (total - 1)) / (max_per_bone - 1));
+        set.vertices.push_back(candidates[index]);
+      }
+    }
+  }
+
+  std::sort(set.vertices.begin(), set.vertices.end(), [](const MeshSampleVertex &a,
+                                                         const MeshSampleVertex &b) {
+    return std::tie(a.bone_name, a.mesh_object_name, a.vertex_index) <
+           std::tie(b.bone_name, b.mesh_object_name, b.vertex_index);
+  });
+  std::set<std::string> sampled_mesh_objects;
+  for (const MeshSampleVertex &vertex : set.vertices) {
+    sampled_mesh_objects.insert(vertex.mesh_object_name);
+  }
+  set.stats.sampled_mesh_objects.assign(sampled_mesh_objects.begin(), sampled_mesh_objects.end());
+  set.stats.selected_vertex_count = int(set.vertices.size());
   set.valid = !set.vertices.empty();
+  if (!set.valid) {
+    set.stats.status = "not_run";
+    set.stats.reason = set.stats.eligible_mesh_object_count == 0 ||
+                               set.stats.mesh_objects_with_vertex_groups == 0 ?
+                           "no_eligible_mesh_or_vertex_group" :
+                           "no_selected_vertices_for_requested_bones";
+  }
+  else {
+    set.stats.status = "sampling_ready";
+    set.stats.reason = "selected_vertices_ready";
+  }
   return set;
 }
 
@@ -724,26 +992,33 @@ MeshSampleSet build_mesh_sample_set(Main *bmain,
  * called) so we can look up the body's bound bone name by runtime index. */
 void capture_mesh_samples(const MMDPhysicsWorld &world,
                           const MeshSampleSet &sample_set,
-                          MMDDiagnosticFrame &r_frame)
+                          MMDDiagnosticFrame &r_frame,
+                          MeshSamplingStats &r_stats)
 {
   if (!sample_set.valid) {
     return;
   }
   for (const MeshSampleVertex &sv : sample_set.vertices) {
+    r_stats.vertex_test_count++;
     int body_index = -1;
     float depth = 0.0f;
-    if (world.find_body_containing_point(sv.blender_position, nullptr, body_index, depth)) {
-      MMDDiagnosticMeshSample sample;
-      sample.bone_name = sv.bone_name;
-      sample.vertex_index = sv.vertex_index;
-      sample.position_world = sv.blender_position;
-      sample.inside_body_index = body_index;
-      sample.penetration_depth = depth;
-      if (body_index >= 0 && body_index < int(r_frame.bodies.size())) {
-        sample.inside_body_bone = r_frame.bodies[body_index].bone_name;
-      }
-      r_frame.mesh_samples.append(std::move(sample));
+    if (!world.find_body_containing_point(sv.blender_position, nullptr, body_index, depth)) {
+      r_stats.nonpenetrating_count++;
+      continue;
     }
+    MMDDiagnosticMeshSample sample;
+    sample.bone_name = sv.bone_name;
+    sample.mesh_object_name = sv.mesh_object_name;
+    sample.vertex_index = sv.vertex_index;
+    sample.position_world = sv.blender_position;
+    sample.inside_body_index = body_index;
+    sample.penetration_depth = depth;
+    if (body_index >= 0 && body_index < int(r_frame.bodies.size())) {
+      sample.inside_body_bone = r_frame.bodies[body_index].bone_name;
+    }
+    r_frame.mesh_samples.append(std::move(sample));
+    r_stats.penetration_sample_count++;
+    r_stats.emitted_record_count++;
   }
 }
 
@@ -757,7 +1032,6 @@ bool append_mmd_physics_diagnostic_frame(const std::string &path,
     return false;
   }
   write_frame(file, frame);
-  fputc('\n', file);
   const bool write_ok = ferror(file) == 0;
   const bool close_ok = fclose(file) == 0;
   return write_ok && close_ok;
@@ -766,6 +1040,7 @@ bool append_mmd_physics_diagnostic_frame(const std::string &path,
 MMDDiagnosticCaptureResult capture_mmd_physics_diagnostics(
     const MMDPhysicsDefinition &definition,
     Object *armature,
+    Collection *model_collection,
     Main *bmain,
     Depsgraph *depsgraph,
     const MMDDiagnosticCaptureOptions &options)
@@ -775,11 +1050,15 @@ MMDDiagnosticCaptureResult capture_mmd_physics_diagnostics(
     result.error = "MMD Physics diagnostics: invalid Blender context";
     return result;
   }
-  if (options.fixed_step_hz <= 0 || options.steps <= 0 || options.solver_iterations <= 0 ||
+  if (options.fixed_step_hz < 30 || options.fixed_step_hz > 480 || options.steps < 1 ||
+      options.steps > 100000 || options.solver_iterations <= 0 ||
       !float3_is_finite(options.gravity) || !std::isfinite(options.joint_spring_damping) ||
       options.joint_spring_damping < 0.0f || options.joint_spring_damping > 1.0f ||
-       options.startup_prewarm_steps < 0 || options.startup_prewarm_steps > 16 ||
-       options.joint_collision_exclusion_depth < 0 ||
+      options.startup_prewarm_steps < 0 || options.startup_prewarm_steps > 16 ||
+      options.startup_sync_steps < 0 || options.startup_sync_steps > 300 ||
+      options.mesh_sample_interval < 1 || options.mesh_sample_interval > 240 ||
+      options.mesh_max_vertices_per_bone < 1 || options.mesh_max_vertices_per_bone > 256 ||
+      options.joint_collision_exclusion_depth < 0 ||
       options.joint_collision_exclusion_depth > 8)
   {
     result.error = "MMD Physics diagnostics: invalid capture options";
@@ -863,7 +1142,7 @@ MMDDiagnosticCaptureResult capture_mmd_physics_diagnostics(
   /* Pre-build the mesh vertex sample set once. Positions are computed from
    * the evaluated mesh (current pose) and reused for every sampling step.
    * Invalid (empty) set disables mesh sampling with zero overhead. */
-  const MeshSampleSet mesh_set = build_mesh_sample_set(bmain,
+  MeshSampleSet mesh_set = build_mesh_sample_set(model_collection,
                                                         depsgraph,
                                                         armature,
                                                         options.mesh_sample_bones,
@@ -892,11 +1171,11 @@ MMDDiagnosticCaptureResult capture_mmd_physics_diagnostics(
     }
     /* Mesh vertex penetration sampling: only on the configured interval
      * and only when the sample set is valid. Non-penetrating vertices
-     * produce no output, so the JSONL size stays bounded. */
-    if (mesh_set.valid && options.mesh_sample_interval > 0 &&
-        (step % options.mesh_sample_interval == 0))
-    {
-      capture_mesh_samples(world, mesh_set, frame);
+     * produce no output, so the JSONL size stays bounded. The summary keeps
+     * the independent accounting for selected and sampled vertices. */
+    if (mesh_set.valid && step % options.mesh_sample_interval == 0) {
+      mesh_set.stats.sampled_step_count++;
+      capture_mesh_samples(world, mesh_set, frame, mesh_set.stats);
     }
     write_frame(jsonl, frame);
     if (ferror(jsonl) != 0) {
@@ -914,15 +1193,30 @@ MMDDiagnosticCaptureResult capture_mmd_physics_diagnostics(
     return result;
   }
 
+  if (mesh_set.valid) {
+    mesh_set.stats.status = mesh_set.stats.penetration_sample_count == 0 ?
+                                "completed_no_penetration_observed" :
+                                "completed_penetration_observed";
+    mesh_set.stats.reason = mesh_set.stats.penetration_sample_count == 0 ?
+                                "no_penetration_samples_emitted" :
+                                "penetration_samples_emitted";
+  }
+
   /* Write both temporary files before touching the last successful capture.
    * Publishing two files cannot be atomic, so move the old pair to backups
    * and restore it on every ordinary failure path. The summary remains the
    * publication gate consumers use to discover a matching JSONL file. */
+  const int first_step = options.capture_initial_state ? -1 :
+                         (result.captured_steps > 0 ? 0 : -1);
+  const int last_step = result.captured_steps > 0 ? result.captured_steps - 1 : -1;
   if (!write_summary(summary_temp_path,
                      options,
                      result.captured_steps,
                      result.body_count,
                      result.joint_count,
+                     first_step,
+                     last_step,
+                     mesh_set.stats,
                      result.jsonl_path))
   {
     delete_if_exists(jsonl_temp_path);

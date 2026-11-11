@@ -32,6 +32,7 @@
 #include "DNA_space_types.h"
 #include "DNA_vfont_types.h"
 
+#include "IMB_colormanagement.hh"
 #include "IMB_imbuf_types.hh"
 
 #include "PRF_profile.hh"
@@ -81,6 +82,7 @@ static int g_fallback_font_id = -1;
 
 void fontmap_clear()
 {
+  std::lock_guard lock(g_font_map.mutex);
   for (const auto &item : g_font_map.path_to_file_font_id.items()) {
     BLF_unload_id(item.value);
   }
@@ -90,7 +92,7 @@ void fontmap_clear()
   }
   g_font_map.name_to_mem_font_id.clear();
 
-  if (g_fallback_font_id) {
+  if (g_fallback_font_id >= 0) {
     BLF_unload_id(g_fallback_font_id);
     g_fallback_font_id = -1;
   }
@@ -824,6 +826,9 @@ int text_effect_font_get(TextVars &text)
   if (font < 0) {
     /* Try to fallback to the default Blender monospaced font. */
     std::lock_guard lock(g_font_map.mutex);
+    if (g_fallback_font_id >= 0 && !BLF_is_loaded_id(g_fallback_font_id)) {
+      g_fallback_font_id = -1;
+    }
     if (g_fallback_font_id < 0) {
       g_fallback_font_id = BLF_load_mono_default(true);
     }
@@ -1112,11 +1117,14 @@ static SeqResult do_text_effect(const RenderData *context,
   /* NOTE: text rasterization only fills in part of output image,
    * need to clear it. */
   SeqResult out = prepare_effect_imbufs(context, {}, {}, false);
+  /* Text colors are stored as sRGB in DNA, so image buffer is as well. */
+  IMB_colormanagement_assign_byte_colorspace(out.image,
+                                             IMB_colormanagement_srgb_colorspace_name_get());
   TextVars *data = static_cast<TextVars *>(strip->effectdata);
 
   /* Guard against parallel accesses to the fonts map. */
-  std::lock_guard font_map_lock(g_font_map.mutex);
   std::lock_guard text_runtime_lock(text_runtime_mutex);
+  std::lock_guard font_map_lock(g_font_map.mutex);
 
   text_effect_update_runtime(context, *data, {out.image->x, out.image->y});
   const int font = data->runtime->font;

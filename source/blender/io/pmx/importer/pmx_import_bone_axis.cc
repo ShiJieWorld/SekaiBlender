@@ -205,7 +205,7 @@ bool read_bone_axis_definition(const ID &owner, PMXBoneAxisDefinitionSet &r_def)
   /* `axis_bone` items are stored as direct children of `definition`.
    * Classic C-style iteration over the ListBase (ListBaseTIterator full definition is
    * not pulled in here; this matches the rest of the pmx importer's iteration style). */
-  for (IDProperty *item = static_cast<IDProperty *>(definition->data.group.first); item != nullptr;
+  for (IDProperty *item = static_cast<IDProperty *>(definition->data.group.first()); item != nullptr;
        item = item->next) {
     if (item->type != IDP_GROUP) {
       continue;

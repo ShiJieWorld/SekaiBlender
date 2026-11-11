@@ -77,11 +77,13 @@ static wmOperatorStatus sequencer_retiming_data_show_exec(bContext *C, wmOperato
   VectorSet<Strip *> selected = seq::query_selected_strips(seq::active_seqbase_get(ed));
   selected.remove_if([](Strip *strip) { return !seq::retiming_is_allowed(strip); });
 
+  Set<Strip *> selected_keys;
   Map<SeqRetimingKey *, Strip *> retiming_sel = seq::retiming_selection_get(ed);
   for (Strip *retiming_strip : retiming_sel.values()) {
     if (seq::retiming_show_keys(retiming_strip)) {
       selected.add(retiming_strip);
     }
+    selected_keys.add(retiming_strip);
   }
 
   if (selected.is_empty()) {
@@ -89,9 +91,8 @@ static wmOperatorStatus sequencer_retiming_data_show_exec(bContext *C, wmOperato
   }
 
   /* If all strips show retiming keys, hide keys for all strips, otherwise, show for all. */
-  const bool all_show = std::all_of(selected.begin(), selected.end(), [](Strip *strip) {
-    return seq::retiming_show_keys(strip);
-  });
+  const bool all_show = std::ranges::all_of(
+      selected, [](Strip *strip) { return seq::retiming_show_keys(strip); });
 
   for (Strip *strip : selected) {
     if (all_show) {
@@ -102,8 +103,10 @@ static wmOperatorStatus sequencer_retiming_data_show_exec(bContext *C, wmOperato
     }
     else {
       strip->flag |= SEQ_SHOW_RETIMING;
-      /* Deselect the strip so only retiming keys are selected. */
-      strip->flag &= ~SEQ_SELECT;
+      /* If retiming keys are selected, deselect the strip, since both can't happen. */
+      if (selected_keys.contains(strip)) {
+        strip->flag &= ~SEQ_SELECT;
+      }
     }
   }
 
@@ -179,6 +182,7 @@ static wmOperatorStatus retiming_key_add_from_selection(const Scene *scene,
     }
     if (seq::retiming_key_add_new_for_strip(scene, op->reports, strip, frame)) {
       inserted = true;
+      strip->flag |= SEQ_SHOW_RETIMING;
     }
   }
 
@@ -200,6 +204,7 @@ static wmOperatorStatus retiming_key_add_to_editable_strips(const Scene *scene,
   for (Strip *strip : selection.values()) {
     if (seq::retiming_key_add_new_for_strip(scene, op->reports, strip, frame)) {
       inserted = true;
+      strip->flag |= SEQ_SHOW_RETIMING;
     }
   }
 
@@ -612,11 +617,6 @@ static void strip_speed_set(Scene *scene, Strip *strip, const float speed)
 
   /* TODO: it would be nice to multiply speed with complex retiming by a factor. */
   seq::retiming_key_speed_set(scene, strip, right_key, speed / 100.0f);
-
-  ListBaseT<Strip> *seqbase = seq::active_seqbase_get(seq::editing_get(scene));
-  if (seq::transform_test_overlap(scene, seqbase, strip)) {
-    seq::transform_seqbase_shuffle(seqbase, strip, scene);
-  }
 }
 
 static void segment_speed_set(Scene *scene,
@@ -625,15 +625,16 @@ static void segment_speed_set(Scene *scene,
 {
   ListBaseT<Strip> *seqbase = seq::active_seqbase_get(seq::editing_get(scene));
 
+  VectorSet<Strip *> retimed_strips;
   for (auto item : selection.items()) {
     seq::relations_invalidate_cache_raw(scene, item.value);
 
     seq::retiming_key_speed_set(scene, item.value, item.key, speed / 100.0f);
 
-    if (seq::transform_test_overlap(scene, seqbase, item.value)) {
-      seq::transform_seqbase_shuffle(seqbase, item.value, scene);
-    }
+    retimed_strips.add(item.value);
   }
+
+  seq::transform_handle_overlap(scene, seqbase, retimed_strips, false);
 }
 
 static wmOperatorStatus sequencer_retiming_segment_speed_set_exec(bContext *C, wmOperator *op)
@@ -648,6 +649,8 @@ static wmOperatorStatus sequencer_retiming_segment_speed_set_exec(bContext *C, w
     for (Strip *strip : strips) {
       strip_speed_set(scene, strip, speed);
     }
+    ListBaseT<Strip> *seqbase = seq::active_seqbase_get(seq::editing_get(scene));
+    seq::transform_handle_overlap(scene, seqbase, strips, false);
     WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, scene);
     return OPERATOR_FINISHED;
   }

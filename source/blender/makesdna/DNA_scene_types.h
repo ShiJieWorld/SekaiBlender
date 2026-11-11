@@ -31,6 +31,7 @@
 #include "DNA_layer_types.h"
 #include "DNA_listBase.h"
 #include "DNA_scene_enums.h"
+#include "DNA_screen_types.h"
 #include "DNA_vec_types.h"
 #include "DNA_view3d_types.h"
 
@@ -714,6 +715,8 @@ enum eRender_Flag : short {
   SCER_ALLOW_PREROLL = 1 << 2,
   /** Show/use sub-frames (for checking motion blur). */
   SCER_SHOW_SUBFRAME = 1 << 3,
+  /** Wrap the playhead within the playback range while navigating timeline. */
+  SCER_WRAP_TIMELINE_NAVIGATION = 1 << 4,
 };
 ENUM_OPERATORS(eRender_Flag)
 
@@ -1134,8 +1137,7 @@ struct UnifiedPaintSettings {
   /** Unified brush stroke input samples. */
   int input_samples = 1;
 
-  /** User preferences for sculpt and paint. */
-  eUnifiedPaintSettingsFlags flag = UNIFIED_PAINT_SIZE | UNIFIED_PAINT_COLOR;
+  eUnifiedPaintSettingsFlags flag = eUnifiedPaintSettingsFlags(0);
 };
 
 /** \} */
@@ -1207,7 +1209,7 @@ enum ePaintCanvasSource : char {
 struct MeshAutomaskingSettings {
   DNA_DEFINE_CXX_METHODS(MeshAutomaskingSettings)
 
-  int flags = 0;
+  eAutomasking_flag flags = eAutomasking_flag(0);
 
   int boundary_edges_propagation_steps = 1;
   int cavity_blur_steps = 2;
@@ -1808,10 +1810,19 @@ struct MeshStatVis {
 
 /** #SequencerToolSettings::overlap_mode */
 enum eSeqOverlapMode : int {
-  SEQ_OVERLAP_EXPAND,
+  SEQ_OVERLAP_RIPPLE,
   SEQ_OVERLAP_OVERWRITE,
   SEQ_OVERLAP_SHUFFLE,
 };
+
+/** #SequencerToolSettings::ripple_flag */
+enum eSeqRippleFlag : int {
+  SEQ_RIPPLE_ALL_CHANNELS = 1 << 0,
+  SEQ_RIPPLE_MARKERS = 1 << 1,
+  SEQ_RIPPLE_INSERT = 1 << 2,
+  SEQ_RIPPLE_CLEAR_RANGES = 1 << 3,
+};
+ENUM_OPERATORS(eSeqRippleFlag)
 
 /** #SequencerToolSettings::snap_mode */
 enum eSequencerSnapMode : short {
@@ -1844,13 +1855,15 @@ struct SequencerToolSettings {
   eSeqImageFitMethod fit_method = SEQ_SCALE_TO_FIT;
   eSequencerSnapMode snap_mode = {};
   eSequencerSnapFlag snap_flag = {};
-  eSeqOverlapMode overlap_mode = SEQ_OVERLAP_EXPAND;
+  eSeqOverlapMode overlap_mode = SEQ_OVERLAP_RIPPLE;
+  eSeqRippleFlag ripple_flag = SEQ_RIPPLE_ALL_CHANNELS | SEQ_RIPPLE_MARKERS |
+                               SEQ_RIPPLE_CLEAR_RANGES;
   /**
    * When there are many snap points,
    * 0-1 range corresponds to resolution from bound-box to all possible snap points.
    */
   int snap_distance = 0;
-  int pivot_point = 0;
+  int pivot_point = V3D_AROUND_CENTER_MEDIAN;
 };
 
 /** \} */
@@ -1956,7 +1969,9 @@ enum eSnapMode : short {
   SCE_SNAP_INDIVIDUAL_NEAREST = (1 << 9),
   SCE_SNAP_INDIVIDUAL_PROJECT = (1 << 10),
 
-  SCE_SNAP_TO_FACE_MIDPOINT = (1 << 11)
+  SCE_SNAP_TO_FACE_MIDPOINT = (1 << 11),
+
+  SCE_SNAP_TO_ORIGIN = (1 << 12)
 };
 ENUM_OPERATORS(eSnapMode)
 
@@ -2796,6 +2811,47 @@ struct TransformOrientationSlot {
 /** \} */
 
 /* -------------------------------------------------------------------- */
+/** \name Scene Compositor Effect
+ * \{ */
+
+enum class SceneCompositorEffectFlags : uint8_t {
+  None = 0,
+  /** The effect is enabled for final render compositing. */
+  EnableForRender = (1 << 0),
+  /**
+   * The effect is enabled for preview compositing, like the interactive compositor or the
+   * viewport compositor.
+   */
+  EnableForPreview = (1 << 1),
+  /**
+   * The effect is the currently active one in the effects stack. Only one effect can be
+   * marked as active in the stack. One effect is guaranteed to be active at all time.
+   */
+  IsActive = (1 << 2),
+  /**
+   * Show the node group selector in the effect, this can be disabled for assets for instance to
+   * make the effect look more like a built-in effect.
+   */
+  ShowNodeGroupSelector = (1 << 3),
+};
+ENUM_OPERATORS(SceneCompositorEffectFlags);
+
+struct SceneCompositorEffect {
+  struct SceneCompositorEffect *next = nullptr, *previous = nullptr;
+  char name[/*MAX_NAME*/ 64] = "";
+  struct bNodeTree *node_group = nullptr;
+  struct IDProperty *system_properties = nullptr;
+  SceneCompositorEffectFlags flags = SceneCompositorEffectFlags::EnableForRender |
+                                     SceneCompositorEffectFlags::EnableForPreview |
+                                     SceneCompositorEffectFlags::ShowNodeGroupSelector;
+  char _pad0[1] = {};
+  uiPanelDataExpansion ui_panel_data_expansion = UI_PANEL_DATA_EXPAND_ROOT;
+  char _pad1[4] = {};
+};
+
+/** \} */
+
+/* -------------------------------------------------------------------- */
 /** \name Scene ID-Block
  * \{ */
 
@@ -2864,7 +2920,9 @@ struct Scene {
   char _pad3[1] = {};
 
   DNA_DEPRECATED struct bNodeTree *nodetree = nullptr;
-  struct bNodeTree *compositing_node_group = nullptr;
+  DNA_DEPRECATED struct bNodeTree *compositing_node_group = nullptr;
+
+  ListBaseT<SceneCompositorEffect> compositor_effects = {nullptr, nullptr};
 
   /** Sequence editor data is allocated here. */
   struct Editing *ed = nullptr;

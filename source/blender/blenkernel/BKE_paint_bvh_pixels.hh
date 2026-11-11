@@ -186,8 +186,10 @@ struct CopyPixelTile {
   Vector<CopyPixelGroup> groups;
   Vector<DeltaCopyPixelCommand> command_deltas;
 
-  /** The groups used by each seam tile, as an index range into #groups which is
-   * sorted by seam tile. */
+  /**
+   * The groups used by each seam tile, as an index range into #groups which is
+   * sorted by seam tile.
+   */
   Map<int, IndexRange> seam_tile_to_groups;
 
   CopyPixelTile(image::TileNumber tile_number) : tile_number(tile_number) {}
@@ -241,7 +243,6 @@ struct PixelData {
 
 void mark_image_dirty(bke::pbvh::Node &node,
                       PixelNode &pixel_node,
-                      Image &image,
                       Map<image::TileNumber, ImBuf *> &buffers);
 PixelData &data_get(bke::pbvh::Tree &pbvh);
 void collect_dirty_tiles(PixelNode &pixel_node, Vector<image::TileNumber> &r_dirty_tiles);

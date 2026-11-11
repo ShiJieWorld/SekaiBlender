@@ -2,6 +2,10 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup bke
+ */
+
 #include <fmt/format.h>
 
 #include "BLI_listbase.hh"
@@ -21,6 +25,7 @@
 #include "DNA_sequence_types.h"
 
 #include "BKE_anim_data.hh"
+#include "BKE_compositor.hh"
 #include "BKE_image.hh"
 #include "BKE_lib_id.hh"
 #include "BKE_library.hh"
@@ -41,6 +46,8 @@
 #include "NOD_geometry_nodes_lazy_function.hh"
 #include "NOD_geometry_nodes_srna.hh"
 #include "NOD_node_declaration.hh"
+#include "NOD_scene_compositor_effect_inputs_srna.hh"
+#include "NOD_shader.h"
 #include "NOD_socket.hh"
 #include "NOD_socket_declarations.hh"
 #include "NOD_sync_sockets.hh"
@@ -221,6 +228,7 @@ using ObjectModifierPair = std::pair<Object *, ModifierData *>;
 using NodeSocketPair = std::pair<bNode *, bNodeSocket *>;
 using StripModifierPair = std::pair<Scene *, StripModifierData *>;
 using StripEffectPair = std::pair<Scene *, Strip *>;
+using SceneCompositorEffectPair = std::pair<Scene *, SceneCompositorEffect *>;
 
 /**
  * Cache common data about node trees from the #Main database that is expensive to retrieve on
@@ -234,6 +242,8 @@ struct NodeTreeRelations {
   std::optional<MultiValueMap<bNodeTree *, ObjectModifierPair>> modifiers_users_;
   std::optional<MultiValueMap<bNodeTree *, StripModifierPair>> strip_modifier_users_;
   std::optional<MultiValueMap<bNodeTree *, StripEffectPair>> strip_effect_users_;
+  std::optional<MultiValueMap<bNodeTree *, SceneCompositorEffectPair>>
+      scene_compositor_effects_users_;
 
  public:
   NodeTreeRelations(Main *bmain) : bmain_(bmain) {}
@@ -342,6 +352,25 @@ struct NodeTreeRelations {
     }
   }
 
+  void ensure_scene_compositor_effects_users()
+  {
+    if (scene_compositor_effects_users_.has_value()) {
+      return;
+    }
+    scene_compositor_effects_users_.emplace();
+    if (bmain_ == nullptr) {
+      return;
+    }
+
+    for (Scene &scene : bmain_->scenes) {
+      for (SceneCompositorEffect &effect : scene.compositor_effects) {
+        if (effect.node_group && !ID_MISSING(effect.node_group)) {
+          scene_compositor_effects_users_->add(effect.node_group, {&scene, &effect});
+        }
+      }
+    }
+  }
+
   Span<ObjectModifierPair> get_modifier_users(bNodeTree *ntree)
   {
     BLI_assert(modifiers_users_.has_value());
@@ -360,6 +389,12 @@ struct NodeTreeRelations {
     return strip_effect_users_->lookup(ntree);
   }
 
+  Span<SceneCompositorEffectPair> get_scene_compositor_effects_users(bNodeTree *ntree)
+  {
+    BLI_assert(scene_compositor_effects_users_.has_value());
+    return scene_compositor_effects_users_->lookup(ntree);
+  }
+
   Span<TreeNodePair> get_group_node_users(bNodeTree *ntree)
   {
     BLI_assert(group_node_users_.has_value());
@@ -372,6 +407,17 @@ struct NodeTreeRelations {
     return *all_trees_;
   }
 };
+
+/** What can be reached from a socket, resets at Light Accumulation. */
+enum class ShaderNodeAncestorFlags {
+  None = 0u,
+  ShaderMaterialOutput = 1u << 0,
+  /** Any other output node socket (AOV, Volume, Displacement...). */
+  OtherOutput = 1u << 1,
+  ShaderToRGB = 1u << 2,
+  LightAccumulationColor = 1u << 3,
+};
+ENUM_OPERATORS(ShaderNodeAncestorFlags);
 
 struct TreeUpdateResult {
   bool interface_changed = false;
@@ -480,8 +526,16 @@ class NodeTreeMainUpdater {
                   *bmain_, *scene, *reinterpret_cast<SequencerCompositorModifierData *>(md));
             }
           }
+
           for (const StripEffectPair &pair : relations_.get_compositor_effect_users(ntree)) {
             seq::compositor_effect_nodes_update_interface(*bmain_, *pair.first, *pair.second);
+          }
+
+          relations_.ensure_scene_compositor_effects_users();
+          for (const SceneCompositorEffectPair &pair :
+               relations_.get_scene_compositor_effects_users(ntree))
+          {
+            compositor::update_effect_node_group_interface(*bmain_, *pair.first, *pair.second);
           }
         }
       }
@@ -675,6 +729,8 @@ class NodeTreeMainUpdater {
             nodes::create_compositor_nodes_rna_for_strip_modifier(ntree);
         ntree.runtime->compositor_effect_nodes_srna_data =
             nodes::create_compositor_nodes_rna_for_effect(ntree);
+        ntree.runtime->scene_compositor_effect_srna_data =
+            nodes::create_scene_compositor_effect_inputs_srna(ntree);
       }
     }
 
@@ -810,25 +866,6 @@ class NodeTreeMainUpdater {
     }
   }
 
-  struct InternalLink {
-    bNodeSocket *from;
-    bNodeSocket *to;
-    int multi_input_sort_id = 0;
-
-    friend bool operator==(const InternalLink &a, const InternalLink &b) = default;
-  };
-
-  const bNodeLink *first_non_dangling_link(const bNodeTree & /*ntree*/,
-                                           const Span<const bNodeLink *> links) const
-  {
-    for (const bNodeLink *link : links) {
-      if (!link->fromnode->is_dangling_reroute()) {
-        return link;
-      }
-    }
-    return nullptr;
-  }
-
   void update_internal_links(bNodeTree &ntree)
   {
     bke::node_tree_runtime::AllowUsingOutdatedInfo allow_outdated_info{ntree};
@@ -838,7 +875,7 @@ class NodeTreeMainUpdater {
         continue;
       }
       /* Find all expected internal links. */
-      Vector<InternalLink> expected_internal_links;
+      Vector<bNodeInternalLink> expected_internal_links;
       for (const bNodeSocket *output_socket : node->output_sockets()) {
         if (!output_socket->is_available()) {
           continue;
@@ -853,14 +890,8 @@ class NodeTreeMainUpdater {
           continue;
         }
 
-        const Span<const bNodeLink *> connected_links = input_socket->directly_linked_links();
-        const bNodeLink *connected_link = first_non_dangling_link(ntree, connected_links);
-
-        const int index = connected_link ? connected_link->multi_input_sort_id :
-                                           std::max<int>(0, connected_links.size() - 1);
-        expected_internal_links.append(InternalLink{const_cast<bNodeSocket *>(input_socket),
-                                                    const_cast<bNodeSocket *>(output_socket),
-                                                    index});
+        expected_internal_links.append(bNodeInternalLink{
+            const_cast<bNodeSocket *>(input_socket), const_cast<bNodeSocket *>(output_socket)});
       }
 
       /* Rebuilt internal links if they have changed. */
@@ -872,9 +903,8 @@ class NodeTreeMainUpdater {
       const bool all_expected_internal_links_exist = std::all_of(
           node->runtime->internal_links.begin(),
           node->runtime->internal_links.end(),
-          [&](const bNodeLink &link) {
-            const InternalLink internal_link{link.fromsock, link.tosock, link.multi_input_sort_id};
-            return expected_internal_links.as_span().contains(internal_link);
+          [&](const bNodeInternalLink &link) {
+            return expected_internal_links.as_span().contains(link);
           });
 
       if (all_expected_internal_links_exist) {
@@ -923,20 +953,10 @@ class NodeTreeMainUpdater {
 
   void update_internal_links_in_node(bNodeTree &ntree,
                                      bNode &node,
-                                     Span<InternalLink> internal_links)
+                                     Span<bNodeInternalLink> internal_links)
   {
     node.runtime->internal_links.clear();
-    node.runtime->internal_links.reserve(internal_links.size());
-    for (const InternalLink &internal_link : internal_links) {
-      bNodeLink link{};
-      link.fromnode = &node;
-      link.fromsock = internal_link.from;
-      link.tonode = &node;
-      link.tosock = internal_link.to;
-      link.multi_input_sort_id = internal_link.multi_input_sort_id;
-      link.flag |= NODE_LINK_VALID;
-      node.runtime->internal_links.append(link);
-    }
+    node.runtime->internal_links.extend(internal_links);
     BKE_ntree_update_tag_node_internal_link(&ntree, &node);
   }
 
@@ -1482,17 +1502,135 @@ class NodeTreeMainUpdater {
     }
   }
 
+  static Array<ShaderNodeAncestorFlags> shader_tree_tag_inputs_by_ancestor(bNodeTree &ntree)
+  {
+    Array<ShaderNodeAncestorFlags> input_ancestors(ntree.all_input_sockets().size(),
+                                                   ShaderNodeAncestorFlags::None);
+
+    for (const bNode *node : ntree.toposort_right_to_left()) {
+      if (ELEM(node->type_legacy,
+               SH_NODE_OUTPUT_MATERIAL,
+               SH_NODE_OUTPUT_WORLD,
+               SH_NODE_OUTPUT_LIGHT,
+               SH_NODE_OUTPUT_AOV))
+      {
+        for (const bNodeSocket *socket : node->input_sockets()) {
+          input_ancestors[socket->index_in_all_inputs()] =
+              (node->type_legacy == SH_NODE_OUTPUT_MATERIAL &&
+               socket->identifier_ustr() == "Surface"_ustr) ?
+                  ShaderNodeAncestorFlags::ShaderMaterialOutput :
+                  ShaderNodeAncestorFlags::OtherOutput;
+        }
+        continue;
+      }
+
+      ShaderNodeAncestorFlags node_flags = ShaderNodeAncestorFlags::None;
+      for (const bNodeSocket *socket : node->output_sockets()) {
+        for (const bNodeLink *link : socket->directly_linked_links()) {
+          if (link->is_used()) {
+            node_flags |= input_ancestors[link->tosock->index_in_all_inputs()];
+          }
+        }
+      }
+
+      if (node->type_legacy == SH_NODE_SHADERTORGB) {
+        node_flags |= ShaderNodeAncestorFlags::ShaderToRGB;
+      }
+      else if (node->type_legacy == SH_NODE_LIGHT_ACCUMULATION) {
+        /* Reset. We only care about what a lighting node reaches before passing through
+         * LightAccumulation. */
+        node_flags = ShaderNodeAncestorFlags::None;
+      }
+
+      for (const bNodeSocket *socket : node->input_sockets()) {
+        ShaderNodeAncestorFlags &socket_flags = input_ancestors[socket->index_in_all_inputs()];
+        socket_flags = node_flags;
+        if (node->type_legacy == SH_NODE_LIGHT_ACCUMULATION && ELEM(socket->identifier_ustr(),
+                                                                    "Diffuse Color"_ustr,
+                                                                    "Glossy Color"_ustr,
+                                                                    "Transmission Color"_ustr))
+        {
+          socket_flags |= ShaderNodeAncestorFlags::LightAccumulationColor;
+        }
+      }
+    }
+
+    return input_ancestors;
+  }
+
+  static bool is_lighting_node(const bNode &node)
+  {
+    switch (node.type_legacy) {
+      case SH_NODE_LIGHT_ACCUMULATION:
+      case SH_NODE_LIGHT_INFO:
+      case SH_NODE_LIGHT_EVALUATION:
+      case SH_NODE_SHADOW_RAYCAST:
+        return true;
+      /* Attribute and Vector Transform nodes are only lighting nodes in light mode. */
+      case SH_NODE_ATTRIBUTE:
+        return static_cast<const NodeShaderAttribute *>(node.storage)->type == SHD_ATTRIBUTE_LIGHT;
+      case SH_NODE_VECT_TRANSFORM: {
+        const NodeShaderVectTransform *nodeprop = static_cast<const NodeShaderVectTransform *>(
+            node.storage);
+        return ELEM(SHD_VECT_TRANSFORM_SPACE_LIGHT, nodeprop->convert_from, nodeprop->convert_to);
+      }
+      default:
+        return false;
+    }
+  }
+
+  static const char *shader_tree_link_error(bNodeLink &link,
+                                            const Span<ShaderNodeAncestorFlags> input_ancestors)
+  {
+    const bNode &from_node = *link.fromnode;
+    if (!is_lighting_node(from_node)) {
+      return nullptr;
+    }
+    const ShaderNodeAncestorFlags to_flags = input_ancestors[link.tosock->index_in_all_inputs()];
+    if (bool(to_flags & ShaderNodeAncestorFlags::ShaderToRGB)) {
+      return TIP_("Shader To RGB can't evaluate Lighting nodes");
+    }
+    if (from_node.type_legacy == SH_NODE_LIGHT_ACCUMULATION) {
+      if (bool(to_flags & ShaderNodeAncestorFlags::OtherOutput)) {
+        return TIP_("Light Accumulation can only be used for the Material Output Surface");
+      }
+    }
+    else {
+      if (bool(to_flags & (ShaderNodeAncestorFlags::ShaderMaterialOutput |
+                           ShaderNodeAncestorFlags::OtherOutput)))
+      {
+        return TIP_(
+            "Lighting nodes must be connected to the Light sockets of a Light Accumulation node "
+            "before reaching an output");
+      }
+      if (bool(to_flags & ShaderNodeAncestorFlags::LightAccumulationColor)) {
+        return TIP_(
+            "Lighting nodes can't be connected to the Color sockets of a Light Accumulation node");
+      }
+    }
+    return nullptr;
+  }
+
   void update_link_validation(bNodeTree &ntree)
   {
     const bNodeTreeZones *fallback_zones = nullptr;
-    if (ELEM(ntree.type, NTREE_GEOMETRY, NTREE_SHADER) && !ntree.zones() &&
+    if (ELEM(ntree.type, NTREE_GEOMETRY, NTREE_SHADER, NTREE_COMPOSIT) && !ntree.zones() &&
         ntree.runtime->last_valid_zones)
     {
       fallback_zones = ntree.runtime->last_valid_zones.get();
     }
 
+    /* Clear the validity from the previous update first. */
     for (bNodeLink &link : ntree.links) {
       link.flag |= NODE_LINK_VALID;
+    }
+
+    Array<ShaderNodeAncestorFlags> shader_input_ancestors;
+    if (ntree.type == NTREE_SHADER) {
+      shader_input_ancestors = shader_tree_tag_inputs_by_ancestor(ntree);
+    }
+
+    for (bNodeLink &link : ntree.links) {
       if (!link.fromsock->is_available() || !link.tosock->is_available()) {
         link.flag &= ~NODE_LINK_VALID;
         continue;
@@ -1553,6 +1691,13 @@ class NodeTreeMainUpdater {
         link.flag &= ~NODE_LINK_VALID;
         ntree.runtime->link_errors.add(NodeLinkKey{link}, NodeLinkError{error});
         continue;
+      }
+      if (ntree.type == NTREE_SHADER) {
+        if (const char *error = shader_tree_link_error(link, shader_input_ancestors)) {
+          link.flag &= ~NODE_LINK_VALID;
+          ntree.runtime->link_errors.add(NodeLinkKey{link}, NodeLinkError{error});
+          continue;
+        }
       }
     }
   }
@@ -2109,9 +2254,9 @@ class NodeTreeMainUpdater {
       }
       bNodeTreeInterfacePanel *panel = reinterpret_cast<bNodeTreeInterfacePanel *>(item);
       if (bNodeTreeInterfaceSocket *toggle_socket = panel->header_toggle_socket()) {
-        if (!STREQ(panel->name, toggle_socket->name)) {
-          MEM_SAFE_DELETE(toggle_socket->name);
-          toggle_socket->name = BLI_strdup_null(panel->name);
+        if (!STREQ(panel->name_, toggle_socket->name_)) {
+          MEM_SAFE_DELETE(toggle_socket->name_);
+          toggle_socket->name_ = BLI_strdup_null(panel->name_);
           changed = true;
         }
       }
@@ -2246,24 +2391,17 @@ bool operator==(const bNestedNodePath &a, const bNestedNodePath &b)
   return a.node_id == b.node_id && a.id_in_node == b.id_in_node;
 }
 
-/**
- * Protect from recursive calls into the updating function. Some node update functions might
- * trigger this from Python or in other cases.
- *
- * This could be added to #Main, but given that there is generally only one #Main, that's not
- * really worth it now.
- */
-static bool is_updating = false;
-
 void BKE_ntree_update(Main &bmain,
                       const std::optional<Span<bNodeTree *>> modified_trees,
                       const NodeTreeUpdateExtraParams &params)
 {
-  if (is_updating) {
+  /* Protect from recursive calls into the updating function. Some node update functions might
+   * trigger this from Python or in other cases. */
+  if (bmain.is_updating_node_trees) {
     return;
   }
 
-  is_updating = true;
+  bmain.is_updating_node_trees = true;
   bke::NodeTreeMainUpdater updater{&bmain, params};
   if (modified_trees.has_value()) {
     updater.update_rooted(*modified_trees);
@@ -2271,7 +2409,7 @@ void BKE_ntree_update(Main &bmain,
   else {
     updater.update();
   }
-  is_updating = false;
+  bmain.is_updating_node_trees = false;
 }
 
 void BKE_ntree_update_after_single_tree_change(Main &bmain,
@@ -2284,14 +2422,17 @@ void BKE_ntree_update_after_single_tree_change(Main &bmain,
 void BKE_ntree_update_without_main(bNodeTree &tree)
 {
   BLI_assert(tree.id.tag & ID_TAG_NO_MAIN);
-  if (is_updating) {
+
+  /* Protect from recursive calls, see #BKE_ntree_update. */
+  if (tree.runtime->is_updating) {
     return;
   }
-  is_updating = true;
+
+  tree.runtime->is_updating = true;
   NodeTreeUpdateExtraParams params;
   bke::NodeTreeMainUpdater updater{nullptr, params};
   updater.update_rooted({&tree});
-  is_updating = false;
+  tree.runtime->is_updating = false;
 }
 
 }  // namespace blender

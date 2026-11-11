@@ -80,7 +80,7 @@ int urename(const char *oldname, const char *newname, const bool do_replace)
 
   if (oldname_16 && newname_16) {
     /* Closer to UNIX `rename` behavior, as it at least allows to replace an existing file.
-     * Return value logic is inverted however (returns non-zero on sucess, 0 on failure).
+     * Return value logic is inverted however (returns non-zero on success, 0 on failure).
      * Note that the operation will still fail if the 'newname' existing file is opened anywhere.
      */
     r = (MoveFileExW(oldname_16, newname_16, do_replace ? MOVEFILE_REPLACE_EXISTING : 0) == 0);
@@ -151,22 +151,21 @@ int uput_getenv(const char *varname, char *value, size_t buffsize)
 int uputenv(const char *name, const char *value)
 {
   int r = -1;
+  /* `_wputenv_s` doesn't support a null value, an empty value removes the variable. */
+  if (value == nullptr) {
+    value = "";
+  }
+
   UTF16_ENCODE(name);
 
-  if (value) {
-    /* set */
+  if (name_16) {
     UTF16_ENCODE(value);
-
-    if (name_16 && value_16) {
-      r = (SetEnvironmentVariableW(name_16, value_16) != 0) ? 0 : -1;
+    if (value_16) {
+      /* Not `SetEnvironmentVariableW` as it doesn't update the environment `getenv` reads,
+       * `_wputenv_s` updates that as well as the block child processes inherit. */
+      r = (_wputenv_s(name_16, value_16) == 0) ? 0 : -1;
     }
     UTF16_UN_ENCODE(value);
-  }
-  else {
-    /* clear */
-    if (name_16) {
-      r = (SetEnvironmentVariableW(name_16, NULL) != 0) ? 0 : -1;
-    }
   }
 
   UTF16_UN_ENCODE(name);

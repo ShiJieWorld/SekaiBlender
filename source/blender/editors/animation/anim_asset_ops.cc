@@ -2,6 +2,10 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup edanimation
+ */
+
 #include "BLI_listbase.hh"
 
 #include "BKE_asset.hh"
@@ -117,6 +121,7 @@ static blender::animrig::Action &extract_pose(Main &bmain, const Span<Object *> 
    * slots on the same action. */
 
   using namespace blender::animrig;
+  using blender::animrig::Strip;
   Action &action = action_add(bmain, "pose_create");
   Layer &layer = action.layer_add("pose");
   Strip &strip = layer.strip_add(action, Strip::Type::Keyframe);
@@ -200,7 +205,7 @@ static void ensure_asset_ui_visible(bContext &C)
     const bScreen *screen = WM_window_get_active_screen(&win);
     for (ScrArea &area : screen->areabase) {
       if (area.type->spaceid == SPACE_FILE) {
-        SpaceFile *sfile = reinterpret_cast<SpaceFile *>(area.spacedata.first);
+        SpaceFile *sfile = area.spacedata.first_as<SpaceFile>();
         if (sfile->browse_mode == FILE_BROWSE_MODE_ASSETS) {
           /* Asset Browser is open. */
           return;
@@ -718,7 +723,10 @@ static void update_pose_action_from_scene(Main *bmain,
 static wmOperatorStatus pose_asset_modify_exec(bContext *C, wmOperator *op)
 {
   bAction *action = get_action_of_selected_asset(C);
-  BLI_assert_msg(action, "Poll should have checked action exists");
+  if (!action) {
+    BKE_report(op->reports, RPT_ERROR, "Failed to load pose asset");
+    return OPERATOR_CANCELLED;
+  }
 
   if (ID_IS_LINKED(action) && !is_pose_asset_blend_editable(*action, op->reports)) {
     return OPERATOR_CANCELLED;

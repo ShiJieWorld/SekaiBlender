@@ -557,7 +557,7 @@ TEST_F(VMDActionContractTest, coordinates_and_time)
 {
   /* Set BoneA's matrix_local to identity so the converter behaves like the
    * simple (x,z,y) swap for this existing regression test. */
-  Bone *bone_a = static_cast<Bone *>(armature->bonebase.first);
+  Bone *bone_a = static_cast<Bone *>(armature->bonebase.first());
   ASSERT_NE(bone_a, nullptr);
   unit_m4(bone_a->arm_mat);
 
@@ -984,7 +984,7 @@ TEST_F(VMDActionContractTest, bone_location_uses_reordered_channels)
 {
   /* Distinct ax per VMD channel proves the Y-up<->Z-up reorder is honoured:
    * location[0]<-VMD X(ax=10), location[1]<-VMD Z(ax=107), location[2]<-VMD Y(ax=20). */
-  Bone *bone_a = static_cast<Bone *>(armature->bonebase.first);
+  Bone *bone_a = static_cast<Bone *>(armature->bonebase.first());
   ASSERT_NE(bone_a, nullptr);
   unit_m4(bone_a->arm_mat);
 
@@ -1040,7 +1040,7 @@ TEST_F(VMDActionContractTest, ik_property_frames_include_import_offset)
 
 TEST_F(VMDActionContractTest, nonlinear_interpolation_survives_export_and_reimport)
 {
-  Bone *bone = static_cast<Bone *>(armature->bonebase.first);
+  Bone *bone = static_cast<Bone *>(armature->bonebase.first());
   ASSERT_NE(bone, nullptr);
   unit_m4(bone->arm_mat);
 
@@ -1167,7 +1167,7 @@ static constexpr float kConverterEpsilon = 1.0e-5f;
 TEST_F(VMDActionContractTest, bone_converter_identity_matrix_local)
 {
   /* Bone.matrix_local is backed by Bone::arm_mat in Blender. */
-  Bone *bone = static_cast<Bone *>(armature->bonebase.first);
+  Bone *bone = static_cast<Bone *>(armature->bonebase.first());
   ASSERT_NE(bone, nullptr);
   unit_m4(bone->arm_mat);
 
@@ -1221,7 +1221,7 @@ TEST_F(VMDActionContractTest, bone_converter_identity_matrix_local)
 TEST_F(VMDActionContractTest, bone_converter_non_identity_matrix_local)
 {
   /* Set Bone.matrix_local to a 90° rotation about X axis. */
-  Bone *bone = static_cast<Bone *>(armature->bonebase.first);
+  Bone *bone = static_cast<Bone *>(armature->bonebase.first());
   ASSERT_NE(bone, nullptr);
   unit_m4(bone->arm_mat);
   bone->arm_mat[1][1] = 0.0f;

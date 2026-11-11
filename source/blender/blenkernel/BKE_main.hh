@@ -227,7 +227,7 @@ struct MainColorspace {
    * File working color-space for all scene linear colors.
    * The name is only for the user interface and is not a unique identifier, the matrix is
    * the XYZ color-space is the source of truth.
-   * */
+   */
   char scene_linear_name[64 /*MAX_COLORSPACE_NAME*/] = "";
   float3x3 scene_linear_to_xyz = float3x3::zero();
 
@@ -236,6 +236,8 @@ struct MainColorspace {
    * used to create this blend file is missing.
    */
   bool is_missing_opencolorio_config = false;
+  /** The OpenColorIO config failed to load. */
+  bool is_failed_opencolorio_config = false;
 };
 
 struct Main : NonCopyable, NonMovable {
@@ -274,7 +276,8 @@ struct Main : NonCopyable, NonMovable {
    * compatibility issues (data loss).
    *
    * \note In practice currently this is only based on the version numbers, in the future it
-   * could try to use more refined detection on load. */
+   * could try to use more refined detection on load.
+   */
   bool has_forward_compatibility_issues = false;
 
   /**
@@ -342,6 +345,9 @@ struct Main : NonCopyable, NonMovable {
    * Set when reading a file from undo with incomplete preview, to trigger restart of preview jobs.
    */
   bool need_preview_render_restart = false;
+
+  /** Protect from recursive node tree updates, see #BKE_ntree_update. */
+  bool is_updating_node_trees = false;
 
   /**
    * The blend-file thumbnail. If set, it will show as image preview of the blend-file in the
@@ -690,7 +696,7 @@ void BKE_main_library_weak_reference_add(ID *local_id,
 
 #define FOREACH_MAIN_LISTBASE_ID_BEGIN(_lb, _id) \
   { \
-    ID *_id_next = static_cast<ID *>((_lb)->first); \
+    ID *_id_next = static_cast<ID *>((_lb)->first_); \
     for ((_id) = _id_next; (_id) != nullptr; (_id) = _id_next) { \
       _id_next = static_cast<ID *>((_id)->next);
 
@@ -718,7 +724,8 @@ void BKE_main_library_weak_reference_add(ID *local_id,
  * before objects, which will be processed before obdata types, etc.).
  *
  * WARNING: DO NOT use break statement with that macro, use #FOREACH_MAIN_LISTBASE and
- * #FOREACH_MAIN_LISTBASE_ID instead if you need that kind of control flow. */
+ * #FOREACH_MAIN_LISTBASE_ID instead if you need that kind of control flow.
+ */
 #define FOREACH_MAIN_ID_BEGIN(_bmain, _id) \
   { \
     ListBaseT<ID> *_lb; \

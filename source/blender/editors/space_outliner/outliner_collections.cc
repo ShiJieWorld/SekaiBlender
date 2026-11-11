@@ -246,11 +246,13 @@ static wmOperatorStatus collection_new_exec(bContext *C, wmOperator *op)
             bmain, scene, nullptr, reinterpret_cast<Object *>(active_te->store_elem->id));
       }
     }
+    if (!collection && view_layer->active_collection) {
+      collection = view_layer->active_collection->collection;
+    }
   }
 
   if (collection == nullptr || !ID_IS_EDITABLE(collection) || ID_IS_OVERRIDE_LIBRARY(collection)) {
-    collection = view_layer->active_collection ? view_layer->active_collection->collection :
-                                                 scene->master_collection;
+    collection = scene->master_collection;
   }
 
   if (!ID_IS_EDITABLE(scene) || ID_IS_OVERRIDE_LIBRARY(scene)) {
@@ -271,7 +273,7 @@ static wmOperatorStatus collection_new_exec(bContext *C, wmOperator *op)
 
   outliner_build_tree(bmain, workspace, scene, view_layer, space_outliner, region);
   bool is_textbut_set = false;
-  tree_iterator::all_open(*space_outliner, [&](TreeElement *te) {
+  tree_iterator::all(space_outliner->runtime->tree, [&](TreeElement *te) {
     TreeStoreElem *tselem = TREESTORE(te);
     if (Collection *collection = outliner_collection_from_tree_element(te)) {
       if ((new_collection == collection) && !is_textbut_set) {
@@ -294,7 +296,7 @@ void OUTLINER_OT_collection_new(wmOperatorType *ot)
   /* identifiers */
   ot->name = "New Collection";
   ot->idname = "OUTLINER_OT_collection_new";
-  ot->description = "Add a new collection inside selected collection";
+  ot->description = "Add a new collection";
 
   /* API callbacks. */
   ot->exec = collection_new_exec;
@@ -305,7 +307,7 @@ void OUTLINER_OT_collection_new(wmOperatorType *ot)
 
   /* properties */
   PropertyRNA *prop = RNA_def_boolean(
-      ot->srna, "nested", true, "Nested", "Add as child of selected collection");
+      ot->srna, "nested", false, "Nested", "Add as child of selected collection");
   RNA_def_property_flag(prop, PROP_SKIP_SAVE);
 }
 
@@ -535,7 +537,7 @@ static wmOperatorStatus collection_objects_select_exec(bContext *C, wmOperator *
                          outliner_collect_selected_collections,
                          &selected_collections);
 
-  if (selected_collections.selected_array.first == nullptr) {
+  if (selected_collections.selected_array.first_ == nullptr) {
     return OPERATOR_CANCELLED;
   }
 
@@ -846,6 +848,7 @@ static wmOperatorStatus collection_instance_exec(bContext *C, wmOperator * /*op*
     Object *ob = object::add_type(
         C, OB_EMPTY, collection->id.name + 2, scene->cursor.location, nullptr, false, 0);
     ob->instance_collection = collection;
+    ob->empty_drawsize = U.collection_instance_empty_size;
     ob->transflag |= OB_DUPLICOLLECTION;
     id_us_plus(&collection->id);
   }
@@ -1116,7 +1119,7 @@ static wmOperatorStatus collection_isolate_exec(bContext *C, wmOperator *op)
   outliner_tree_traverse(space_outliner,
                          &space_outliner->runtime->tree,
                          0,
-                         TSE_SELECTED,
+                         extend ? TSE_SELECTED : TSE_ACTIVE,
                          layer_collection_collect_data_to_edit,
                          &data);
 
@@ -1505,7 +1508,7 @@ static TreeTraversalAction outliner_hide_collect_data_to_edit(TreeElement *te, v
       /* Skip - showing warning/error message might be misleading
        * when deleting multiple collections, so just do nothing. */
     }
-    else if (tselem->flag & TSE_SELECTED) {
+    else if (!data->hide_unselected && tselem->flag & TSE_SELECTED) {
       /* Delete, duplicate and link don't edit children,
        * those will come along with the parents. */
       data->collections_to_edit.add(lc);
@@ -1584,7 +1587,7 @@ static wmOperatorStatus outliner_unhide_all_exec(bContext *C, wmOperator * /*op*
   ViewLayer *view_layer = CTX_data_view_layer(C);
 
   /* Unhide all the collections. */
-  LayerCollection *lc_master = static_cast<LayerCollection *>(view_layer->layer_collections.first);
+  LayerCollection *lc_master = view_layer->layer_collections.first();
   for (LayerCollection &lc_iter : lc_master->layer_collections) {
     BKE_layer_collection_set_flag(&lc_iter, LAYER_COLLECTION_HIDE, false);
   }

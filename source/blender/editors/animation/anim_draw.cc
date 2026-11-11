@@ -31,6 +31,8 @@
 #include "BKE_global.hh"
 #include "BKE_mask.hh"
 #include "BKE_nla.hh"
+#include "BKE_scene_context.hh"
+#include "BKE_unit.hh"
 
 #include "ED_anim_api.hh"
 #include "ED_keyframes_edit.hh"
@@ -649,7 +651,7 @@ float ANIM_unit_mapping_get_factor(Scene *scene, ID *id, FCurve *fcu, short flag
     return 1.0f;
   }
 
-  const StringRefNull rna_path = fcu->rna_path();
+  const ParsedRNAPathRef rna_path = fcu->rna_path_parsed();
   if (rna_path.is_empty()) {
     return 1.0f;
   }
@@ -657,30 +659,46 @@ float ANIM_unit_mapping_get_factor(Scene *scene, ID *id, FCurve *fcu, short flag
   PointerRNA ptr;
   PropertyRNA *prop;
   PointerRNA id_ptr = RNA_id_pointer_create(id);
-  if (!RNA_path_resolve_property(&id_ptr, rna_path.c_str(), &ptr, &prop)) {
+  if (!RNA_path_resolve_property(&id_ptr, rna_path, &ptr, &prop)) {
     /* Without resolving the property, its type & subtype are unknown; remapping is impossible. */
     return 1.0f;
   }
 
   const PropertyUnit prop_unit = PropertyUnit(RNA_SUBTYPE_UNIT(RNA_property_subtype(prop)));
 
+  UnitConversion unit_conversion;
+  const int b_unit = RNA_SUBTYPE_UNIT_VALUE(prop_unit);
+
   switch (prop_unit) {
+    /* Units not affected by the scene's unit scale. */
     case PROP_UNIT_ROTATION:
-      if (scene->unit.system_rotation == USER_UNIT_ROT_RADIANS) {
-        return 1.0f;
+    case PROP_UNIT_TIME:
+      unit_conversion = BKE_unit_preferred_conversion_get(scene->unit, b_unit);
+      break;
+    /* Units that BKE_unit_value_scale() also scales by the scene's unit scale.
+     * Assumption: BKE_unit_value_scale() is linear and zero maps to zero for these
+     * unit types, so the scaled value can be used as a scaler factor. */
+    case PROP_UNIT_LENGTH:
+    case PROP_UNIT_MASS: {
+      unit_conversion = BKE_unit_preferred_conversion_get(scene->unit, b_unit);
+      const double scene_scale = BKE_unit_value_scale(scene->unit, b_unit, 1.0);
+      if (scene_scale != 0.0) {
+        unit_conversion.scalar /= scene_scale;
       }
-
-      if (flag & ANIM_UNITCONV_RESTORE) {
-        return DEG2RADF(1.0f);
-      }
-      return RAD2DEGF(1.0f);
-
+      break;
+    }
     default:
-      /* TODO: other rotation types here as necessary */
+      /* Other units are not scaled. */
       break;
   }
+  BLI_assert_msg(unit_conversion.bias == 0.0,
+                 "Only linear units (without bias) are supported for now.");
+  BLI_assert(unit_conversion.scalar != 0.0);
 
-  return 1.0f;
+  if (flag & ANIM_UNITCONV_RESTORE) {
+    return float(unit_conversion.scalar);
+  }
+  return float(1.0 / unit_conversion.scalar);
 }
 
 static bool find_prev_next_keyframes(bContext *C, int *r_nextfra, int *r_prevfra)
@@ -782,8 +800,7 @@ static bool find_prev_next_keyframes(bContext *C, int *r_nextfra, int *r_prevfra
 
 void ANIM_center_frame(bContext *C, int smooth_viewtx)
 {
-  const bool is_sequencer = CTX_wm_space_seq(C) != nullptr;
-  Scene *scene = is_sequencer ? CTX_data_sequencer_scene(C) : CTX_data_scene(C);
+  Scene *scene = bke::scene_or_sequencer_scene_from_context(*C);
   if (!scene) {
     return;
   }

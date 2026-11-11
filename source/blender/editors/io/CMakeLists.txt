@@ -13,7 +13,9 @@ set(INC
   ../../io/common
   ../../io/fbx
   ../../io/grease_pencil
+  ../../io/otio
   ../../io/ply
+  ../../io/spz
   ../../io/stl
   ../../io/pmx
   ../../io/usd
@@ -38,7 +40,9 @@ set(SRC
   io_grease_pencil.cc
   io_obj.cc
   io_ops.cc
+  io_otio_ops.cc
   io_ply_ops.cc
+  io_spz_ops.cc
   io_stl_ops.cc
   io_pmx_ops.cc
   io_usd.cc
@@ -52,7 +56,9 @@ set(SRC
   io_grease_pencil.hh
   io_obj.hh
   io_ops.hh
+  io_otio_ops.hh
   io_ply_ops.hh
+  io_spz_ops.hh
   io_stl_ops.hh
   io_pmx_ops.hh
   io_usd.hh
@@ -70,6 +76,7 @@ set(LIB
   PRIVATE bf::dna
   PRIVATE bf::intern::guardedalloc
   PRIVATE bf::intern::clog
+  PRIVATE bf::sequencer
   PRIVATE bf::windowmanager
   PRIVATE bf_io_vmd
 )
@@ -86,6 +93,13 @@ if(WITH_IO_PLY)
     bf_io_ply
   )
   add_definitions(-DWITH_IO_PLY)
+endif()
+
+if(WITH_IO_SPZ)
+  list(APPEND LIB
+    bf_io_spz
+  )
+  add_definitions(-DWITH_IO_SPZ)
 endif()
 
 if(WITH_IO_STL)
@@ -135,6 +149,13 @@ if(WITH_USD)
     PRIVATE bf::dependencies::optional::usd
   )
   add_definitions(-DWITH_USD)
+endif()
+
+if(WITH_OPENTIMELINEIO)
+  list(APPEND LIB
+    bf_io_otio
+  )
+  add_definitions(-DWITH_OPENTIMELINEIO)
 endif()
 
 if(WITH_PUGIXML)

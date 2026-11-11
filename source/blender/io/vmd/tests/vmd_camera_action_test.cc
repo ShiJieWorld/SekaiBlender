@@ -585,7 +585,7 @@ TEST_F(VMDCameraActionTest, reuses_existing_camera)
   EXPECT_EQ(target_camera, existing_camera);
   EXPECT_EQ(existing_camera->parent, target_empty);
   int camera_count = 0;
-  for (Object *object = static_cast<Object *>(bmain->objects.first); object != nullptr;
+  for (Object *object = static_cast<Object *>(bmain->objects.first()); object != nullptr;
        object = static_cast<Object *>(object->id.next))
   {
     if (object->type == OB_CAMERA) {

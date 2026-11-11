@@ -680,10 +680,6 @@ void popup_block_invoke_ex(bContext *C,
 {
   wmWindow *window = CTX_wm_window(C);
 
-#ifdef WITH_INPUT_IME
-  WM_window_IME_end(window);
-#endif
-
   PopupBlockHandle *handle = popup_block_create(
       C, nullptr, nullptr, func, nullptr, arg, arg_free, can_refresh);
   handle->popup = true;
@@ -694,8 +690,7 @@ void popup_block_invoke_ex(bContext *C,
   status.item(" ", ICON_NONE);
 
   popup_handlers_add(C, &window->runtime->modalhandlers, handle, 0);
-  block_active_only_flagged_buttons(
-      C, handle->region, static_cast<Block *>(handle->region->runtime->uiblocks.first));
+  block_active_only_flagged_buttons(C, handle->region, handle->region->runtime->uiblocks.first());
   WM_event_add_mousemove(window);
 }
 
@@ -733,8 +728,7 @@ void popup_block_ex(bContext *C,
   status.item(" ", ICON_NONE);
 
   popup_handlers_add(C, &window->runtime->modalhandlers, handle, 0);
-  block_active_only_flagged_buttons(
-      C, handle->region, static_cast<Block *>(handle->region->runtime->uiblocks.first));
+  block_active_only_flagged_buttons(C, handle->region, handle->region->runtime->uiblocks.first());
   WM_event_add_mousemove(window);
 }
 
@@ -910,6 +904,23 @@ bool popup_block_name_exists(const bScreen *screen, const StringRef name)
         return true;
       }
     }
+  }
+  return false;
+}
+
+bool popup_region_from_operator(const bScreen *screen, const ARegion *region)
+{
+  /* Walk up parent popups, e.g. a popover opened from an operator dialog. Parents may
+   * already be closed, as with a context menu opened from a popover. */
+  while (region && BLI_findindex(&screen->regionbase, region) != -1) {
+    const Block *block = region->runtime->uiblocks.first();
+    if (!(block && block->handle)) {
+      return false;
+    }
+    if (block->handle->popup_op) {
+      return true;
+    }
+    region = block->handle->ctx_region_popup;
   }
   return false;
 }

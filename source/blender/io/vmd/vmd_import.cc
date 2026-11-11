@@ -168,13 +168,13 @@ bool validate_morph_controller(const Object &controller, ReportList *reports, VM
     add_error(result, reports, "VMD morph target Mesh has no Shape Key data");
     return false;
   }
-  if (mesh->key->block.first == nullptr || mesh->key->refkey == nullptr) {
+  if (mesh->key->block.first() == nullptr || mesh->key->refkey == nullptr) {
     add_error(result, reports, "VMD morph target Key has no Basis Shape Key");
     return false;
   }
 
   std::vector<std::string> names;
-  for (const KeyBlock *key_block = static_cast<const KeyBlock *>(mesh->key->block.first);
+  for (const KeyBlock *key_block = static_cast<const KeyBlock *>(mesh->key->block.first());
        key_block != nullptr;
        key_block = key_block->next)
   {
@@ -204,7 +204,7 @@ std::vector<std::string> collect_morph_names(const Object &controller)
   const Mesh *mesh = id_cast<const Mesh *>(controller.data);
   const Key *key = mesh->key;
   std::vector<std::string> names;
-  for (const KeyBlock *key_block = static_cast<const KeyBlock *>(key->block.first);
+  for (const KeyBlock *key_block = static_cast<const KeyBlock *>(key->block.first());
        key_block != nullptr;
        key_block = key_block->next)
   {
@@ -553,7 +553,7 @@ void apply_vmd_ik_toggle(Object &target_armature,
       std::string ik_con_name;
       if (cpchan != nullptr) {
         /* First pass: look for our auto-apply marker name. */
-        for (bConstraint *con = static_cast<bConstraint *>(cpchan->constraints.first);
+        for (bConstraint *con = static_cast<bConstraint *>(cpchan->constraints.first());
              con != nullptr;
              con = con->next)
         {
@@ -566,7 +566,7 @@ void apply_vmd_ik_toggle(Object &target_armature,
         }
         /* Fallback: first IK constraint of any name. */
         if (ik_con_name.empty()) {
-          for (bConstraint *con = static_cast<bConstraint *>(cpchan->constraints.first);
+          for (bConstraint *con = static_cast<bConstraint *>(cpchan->constraints.first());
                con != nullptr;
                con = con->next)
           {

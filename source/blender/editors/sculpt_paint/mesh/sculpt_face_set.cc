@@ -379,9 +379,9 @@ static void clear_face_sets(const Depsgraph &depsgraph, Object &object, const In
     node_mask.foreach_index(
         [&](const int i) {
           const Span<int> faces = nodes[i].faces();
-          if (std::any_of(faces.begin(), faces.end(), [&](const int face) {
-                return face_sets[face] != default_face_set;
-              }))
+          if (std::any_of(faces.begin(),
+                          faces.end(),
+                          [&](const int face) { return face_sets[face] != default_face_set; }))
           {
             undo::push_node(depsgraph, object, &nodes[i], undo::Type::FaceSet);
             node_changed[i] = true;
@@ -397,9 +397,9 @@ static void clear_face_sets(const Depsgraph &depsgraph, Object &object, const In
           Vector<int> &face_indices = all_face_indices.local();
           const Span<int> faces = bke::pbvh::node_face_indices_calc_grids(
               *ss.subdiv_ccg, nodes[i], face_indices);
-          if (std::any_of(faces.begin(), faces.end(), [&](const int face) {
-                return face_sets[face] != default_face_set;
-              }))
+          if (std::any_of(faces.begin(),
+                          faces.end(),
+                          [&](const int face) { return face_sets[face] != default_face_set; }))
           {
             undo::push_node(depsgraph, object, &nodes[i], undo::Type::FaceSet);
             node_changed[i] = true;
@@ -1093,9 +1093,7 @@ static wmOperatorStatus change_visibility_exec(bContext *C, wmOperator *op)
       float location[3];
       copy_v3_v3(location, ss.active_vert_position(depsgraph, object));
       mul_m4_v3(object.object_to_world().ptr(), location);
-      copy_v3_v3(paint_runtime->average_stroke_accum, location);
-      paint_runtime->average_stroke_counter = 1;
-      paint_runtime->last_stroke_valid = true;
+      bke::paint::stroke_set_location(*paint, location);
     }
   }
 
@@ -1684,10 +1682,12 @@ void fill_factor_from_hide_and_mask(const BMesh &bm,
   for (BMFace *f : faces) {
     if (BM_elem_flag_test(f, BM_ELEM_HIDDEN)) {
       r_factors[i] = 0.0f;
+      i++;
       continue;
     }
     if (mask_offset == -1) {
       r_factors[i] = 1.0f;
+      i++;
       continue;
     }
 

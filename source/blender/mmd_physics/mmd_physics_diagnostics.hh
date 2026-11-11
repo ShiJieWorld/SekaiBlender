@@ -12,6 +12,7 @@
 
 namespace blender {
 
+struct Collection;
 struct Main;
 struct Object;
 struct Depsgraph;
@@ -40,7 +41,7 @@ struct MMDDiagnosticCaptureOptions {
   /* 0 scans the complete simple chain; positive values cap graph depth. */
   int joint_collision_exclusion_depth = 0;
 
-  /* Mesh vertex penetration sampling (schema v1.1).
+  /* Mesh vertex penetration sampling (summary schema v2 / r27 Level A).
    *
    * Output volume control is critical: a typical MMD model has 10k+ vertices
    * and 400+ rigid bodies. Naive per-vertex-per-body AABB tests would
@@ -54,7 +55,10 @@ struct MMDDiagnosticCaptureOptions {
    *     (uniform stride selection).
    *   - Sampling runs every `mesh_sample_interval` steps, not every step.
    *   - Only vertices found INSIDE some rigid body's AABB are emitted;
-   *     non-penetrating vertices produce no output. */
+   *     non-penetrating vertices produce no output.
+   *
+   * The capture is a single evaluated pose (or an explicit bind-pose fallback
+   * when no depsgraph is provided); it is not trajectory mesh sampling. */
   std::vector<std::string> mesh_sample_bones;
   int mesh_sample_interval = 30;
   int mesh_max_vertices_per_bone = 16;
@@ -75,13 +79,14 @@ struct MMDDiagnosticCaptureResult {
  *
  * `depsgraph` is used only for mesh vertex penetration sampling (when
  * `options.mesh_sample_bones` is non-empty): it provides the evaluated mesh
- * with armature-deformed vertex positions. Pass nullptr to skip mesh sampling
- * (raw mesh data will be used as a fallback, which reflects bind-pose and is
- * inaccurate for posed armatures).
+ * with armature-deformed vertex positions. Passing nullptr disables the
+ * evaluated-pose path and uses raw mesh data as a bind-pose fallback; the
+ * summary records that mode explicitly.
  */
 MMDDiagnosticCaptureResult capture_mmd_physics_diagnostics(
     const MMDPhysicsDefinition &definition,
     Object *armature,
+    Collection *model_collection,
     Main *bmain,
     Depsgraph *depsgraph,
     const MMDDiagnosticCaptureOptions &options);

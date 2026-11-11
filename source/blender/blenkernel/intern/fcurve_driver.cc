@@ -123,7 +123,7 @@ static bool driver_get_target_context_property(const DriverTargetContext *driver
   /* Reset to a nullptr RNA pointer.
    * This allows to more gracefully handle issues with unsupported configuration (forward
    * compatibility. for example). */
-  *r_property_ptr = PointerRNA_NULL;
+  *r_property_ptr = {};
 
   return false;
 }
@@ -314,7 +314,7 @@ eDriverVariablePropertyResult driver_get_variable_property(
 
   /* Get property to read from, and get value as appropriate. */
   if (dtar->rna_path == nullptr || dtar->rna_path[0] == '\0') {
-    ptr = PointerRNA_NULL;
+    ptr = {};
     prop = nullptr; /* OK. */
   }
   else if (RNA_path_resolve_full(&target_ptr, dtar->rna_path, &ptr, &prop, &index)) {
@@ -322,7 +322,7 @@ eDriverVariablePropertyResult driver_get_variable_property(
   }
   else {
     if (dtar_try_use_fallback(dtar)) {
-      ptr = PointerRNA_NULL;
+      ptr = {};
       *r_prop = nullptr;
       *r_index = -1;
       return DRIVER_VAR_PROPERTY_FALLBACK;
@@ -336,7 +336,7 @@ eDriverVariablePropertyResult driver_get_variable_property(
                  dtar->rna_path);
     }
 
-    ptr = PointerRNA_NULL;
+    ptr = {};
     *r_prop = nullptr;
     *r_index = -1;
 
@@ -1005,7 +1005,7 @@ void driver_variable_name_validate(DriverVar *dvar)
 
 void driver_variable_unique_name(DriverVar *dvar)
 {
-  ListBaseT<DriverVar> variables = {dvar, dvar};
+  ListBaseT<DriverVar> variables = BLI_listbase_from_link(dvar);
   BLI_uniquename(&variables, dvar, dvar->name, '_', offsetof(DriverVar, name), sizeof(dvar->name));
 }
 
@@ -1052,7 +1052,7 @@ void fcurve_free_driver(FCurve *fcu)
   driver = fcu->driver;
 
   /* Free driver targets. */
-  for (dvar = static_cast<DriverVar *>(driver->variables.first); dvar; dvar = dvarn) {
+  for (dvar = driver->variables.first(); dvar; dvar = dvarn) {
     dvarn = dvar->next;
     driver_free_variable_ex(driver, dvar);
   }
@@ -1319,7 +1319,7 @@ static void evaluate_driver_sum(const AnimationEvalContext *anim_eval_context,
   /* Check how many variables there are first (i.e. just one?). */
   if (driver->variables.is_single()) {
     /* Just one target, so just use that. */
-    dvar = static_cast<DriverVar *>(driver->variables.first);
+    dvar = driver->variables.first();
     driver->curval = driver_get_variable_value(anim_eval_context, driver, dvar);
     return;
   }

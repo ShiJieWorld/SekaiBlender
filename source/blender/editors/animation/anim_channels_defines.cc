@@ -921,7 +921,7 @@ static int acf_group_setting_flag(bAnimContext *ac, eAnimChannel_Settings settin
        * proved to be a hazard for workflows...
        */
       return (ac->spacetype == SPACE_GRAPH) ? AGRP_EXPANDED_G : /* Graph Editor case */
-                                              AGRP_EXPANDED;                                 /* DopeSheet and elsewhere */
+                                              AGRP_EXPANDED;    /* DopeSheet and elsewhere */
     }
 
     case ACHANNEL_SETTING_MUTE: /* muted */
@@ -1048,7 +1048,7 @@ static void acf_fcurve_name(bAnimListElem *ale, char *name)
       PointerRNA id_ptr = RNA_id_pointer_create(ale->id);
       PointerRNA ptr;
       PropertyRNA *prop;
-      if (!RNA_path_resolve_property(&id_ptr, fcurve->rna_path().c_str(), &ptr, &prop)) {
+      if (!RNA_path_resolve_property(&id_ptr, fcurve->rna_path_parsed(), &ptr, &prop)) {
         fcurve->flag |= FCURVE_DISABLED;
       }
     }
@@ -5520,7 +5520,7 @@ static bool anim_list_el_is_visibility_related_or_self(const bAnimListElem *targ
   }
 
   /* 2. Hierarchy Roots (Summary/Scene) - Always keep structure visible */
-  if (iter->type == ANIMTYPE_SUMMARY || iter->type == ANIMTYPE_SCENE) {
+  if (ELEM(iter->type, ANIMTYPE_SUMMARY, ANIMTYPE_SCENE)) {
     return true;
   }
 
@@ -5725,7 +5725,7 @@ static void achannel_setting_slider_cb(bContext *C, void *id_poin, void *fcu_poi
   flag = animrig::get_keyframing_flags(scene);
 
   /* try to resolve the path stored in the F-Curve */
-  if (RNA_path_resolve_property(&id_ptr, fcu->rna_path().c_str(), &ptr, &prop)) {
+  if (RNA_path_resolve_property(&id_ptr, fcu->rna_path_parsed(), &ptr, &prop)) {
     /* set the special 'replace' flag if on a keyframe */
     if (animrig::fcurve_frame_has_keyframe(fcu, cfra)) {
       flag |= INSERTKEY_REPLACE;

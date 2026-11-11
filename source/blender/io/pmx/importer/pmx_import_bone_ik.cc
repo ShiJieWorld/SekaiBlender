@@ -125,37 +125,39 @@ static IDProperty *build_ik_definition_property(const PMXModel &model, int &r_ik
   add_int(definition, "schema_version", kBoneIKDefinitionSchemaVersion);
   add_int(definition, "ik_bone_count", ik_count);
 
-  IDProperty *ik_bones = IDP_NewIDPArray("ik_bones");
-  for (const PMXBone &bone : model.bones) {
-    if (!(bone.flag & BONE_FLAG_IK)) {
-      continue;
-    }
-    IDProperty *item = blender::bke::idprop::create_group("ik_bone").release();
-    add_string(item, "name", bone.name_local);
-    add_string(item, "target", bone_name_at(model, bone.ik_target_index));
-    add_int(item, "loop_count", bone.ik_loop_count);
-    add_float(item, "angle_limit", bone.ik_angle_limit);
+  if (ik_count > 0) {
+    IDProperty *ik_bones = IDP_NewIDPArray("ik_bones");
+    for (const PMXBone &bone : model.bones) {
+      if (!(bone.flag & BONE_FLAG_IK)) {
+        continue;
+      }
+      IDProperty *item = blender::bke::idprop::create_group("ik_bone").release();
+      add_string(item, "name", bone.name_local);
+      add_string(item, "target", bone_name_at(model, bone.ik_target_index));
+      add_int(item, "loop_count", bone.ik_loop_count);
+      add_float(item, "angle_limit", bone.ik_angle_limit);
 
-    IDProperty *links = IDP_NewIDPArray("links");
-    for (const PMXIKLink &link : bone.ik_links) {
-      IDProperty *link_item = blender::bke::idprop::create_group("link").release();
-      add_string(link_item, "bone", bone_name_at(model, link.bone_index));
-      add_bool(link_item, "limit_angle", link.limit_angle);
-      add_bool(link_item,
-               "physics_owned",
-               link.bone_index >= 0 && link.bone_index < int(physics_owned_bones.size()) &&
-                   physics_owned_bones[link.bone_index]);
-      std::array<float, 3> min_v, max_v;
-      min_v = {link.limit_min[0], link.limit_min[1], link.limit_min[2]};
-      max_v = {link.limit_max[0], link.limit_max[1], link.limit_max[2]};
-      add_vec3(link_item, "limit_min", min_v);
-      add_vec3(link_item, "limit_max", max_v);
-      append_group(links, link_item);
+      IDProperty *links = IDP_NewIDPArray("links");
+      for (const PMXIKLink &link : bone.ik_links) {
+        IDProperty *link_item = blender::bke::idprop::create_group("link").release();
+        add_string(link_item, "bone", bone_name_at(model, link.bone_index));
+        add_bool(link_item, "limit_angle", link.limit_angle);
+        add_bool(link_item,
+                 "physics_owned",
+                 link.bone_index >= 0 && link.bone_index < int(physics_owned_bones.size()) &&
+                     physics_owned_bones[link.bone_index]);
+        std::array<float, 3> min_v, max_v;
+        min_v = {link.limit_min[0], link.limit_min[1], link.limit_min[2]};
+        max_v = {link.limit_max[0], link.limit_max[1], link.limit_max[2]};
+        add_vec3(link_item, "limit_min", min_v);
+        add_vec3(link_item, "limit_max", max_v);
+        append_group(links, link_item);
+      }
+      add_property(item, links);
+      append_group(ik_bones, item);
     }
-    add_property(item, links);
-    append_group(ik_bones, item);
+    add_property(definition, ik_bones);
   }
-  add_property(definition, ik_bones);
 
   return definition;
 }

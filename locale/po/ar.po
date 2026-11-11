@@ -1,9 +1,9 @@
 
 msgid ""
 msgstr ""
-"Project-Id-Version: Blender 5.3.0 Alpha (b'af9ba6af7621')\n"
+"Project-Id-Version: Blender 5.3.0 Release Candidate (b'f78a5e153839')\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-03 07:24+0000\n"
+"POT-Creation-Date: 2026-11-09 09:34+0000\n"
 "PO-Revision-Date: 2025-07-23 14:53+0000\n"
 "Last-Translator: Anonymous <noreply@weblate.org>\n"
 "Language-Team: Arabic <https://translate.blender.org/projects/blender-ui/ui/ar/>\n"
@@ -1400,10 +1400,6 @@ msgid "Particles"
 msgstr "ﺕﺎﺌﻳﺰﺟ"
 
 
-msgid "Project"
-msgstr "ﻂﻘﺳﺍ"
-
-
 msgid "Screens"
 msgstr "ﺕﺎﺷﺎﺸﻟﺍ"
 
@@ -1424,8 +1420,16 @@ msgid "Window Managers"
 msgstr "ﺓﺬﻓﺎﻨﻟﺍ ءﺍﺭﺪﻣ"
 
 
+msgid "Project"
+msgstr "ﻂﻘﺳﺍ"
+
+
 msgid "Dirty"
 msgstr "ﺔﺨﺳﻭ"
+
+
+msgid "Path"
+msgstr "ﺭﺎﺴﻤﻟﺍ"
 
 
 msgid "Blender RNA"
@@ -2311,6 +2315,10 @@ msgid "Active Layer"
 msgstr "ﺔﻟﺎﻌّﻔﻟﺍ ﺔﻘﺒﻄﻟﺍ"
 
 
+msgid "Cyclic"
+msgstr "ﻱﺭﻭﺩ"
+
+
 msgid "Outline"
 msgstr "ﺭﺎﻃﺍ"
 
@@ -3003,16 +3011,8 @@ msgid "Color management specific to display device"
 msgstr "ﺽﺮﻌﻟﺍ ﺯﺎﻬﺠﺑ ﺔﺼﺘﺨﻤﻟﺍ ﻥﻮﻠﻟﺍ ﺓﺭﺍﺩﺍ"
 
 
-msgid "Display"
-msgstr "ﺽﺮﻋ"
-
-
 msgid "Input color space settings"
 msgstr "ﻥﻮﻠﻟﺍ ﻂﻴﻄﺨﺗ ﺕﺍﺩﺍﺪﻋﺇ"
-
-
-msgid "Input Color Space"
-msgstr "ﻥﻮﻠﻟﺍ ءﺎﻀﻓ"
 
 
 msgid "Color space that the sequencer operates in"
@@ -3039,10 +3039,6 @@ msgid "Gamma"
 msgstr "ﺓﺭﺎﻧﻻ﻿ﺍ"
 
 
-msgid "Look"
-msgstr "ﺮﻈﻧﺃ"
-
-
 msgid "Do not modify image in an artistic manner"
 msgstr "ﻲﻨﻓ ﺏﻮﻠﺳﺄﺑ ﺓﺭﻮﺼﻟﺍ ﻝﺪﻌﺗ ﻻ﻿"
 
@@ -3053,10 +3049,6 @@ msgstr "ﻰﻨﺤﻨﻤﻟﺍ ﺮﻄﻗ ﻡﺪﺨﺘﺳﺍ"
 
 msgid "Use RGB curved for pre-display transformation"
 msgstr "ﺽﺮﻌﻟﺍ-ﻞﺒﻗ ﻝﻮﺤﺘﻟ ﻲﻨﺤﻨﻣ ﻥﻮﻟ ﻡﺪﺨﺘﺳﺍ"
-
-
-msgid "View"
-msgstr "ﺮﻈﻨﻣ"
 
 
 msgid "View used when converting image to a display space"
@@ -3217,6 +3209,10 @@ msgstr "ﻊﻗﻮﻤﻟﺍ"
 
 msgid "Set position of selected color stop"
 msgstr "ﺭﺎﺘﺨﻤﻟﺍ ﻥﻮﻠﻟﺍ ﺮﺷﺆﻣ ﻊﻗﻮﻣ ﻊﺿ"
+
+
+msgid "Identifier"
+msgstr "ﻑﺮﻌﻤﻟﺍ"
 
 
 msgid "Console Input"
@@ -3786,10 +3782,6 @@ msgstr "Z"
 
 msgid "Target Object (Curves only)"
 msgstr "ﻑﺪﻬﻟﺍ ﺕﺎﻨﺋﺎﻜﻟﺍ"
-
-
-msgid "Cyclic"
-msgstr "ﻱﺭﻭﺩ"
 
 
 msgid "Treat curve as cyclic curve (no clamping to curve bounding box)"
@@ -5011,6 +5003,10 @@ msgstr "ﻢﺴﻗﺍ"
 
 msgid "Plane"
 msgstr "ﺢﻄﺳ"
+
+
+msgid "View"
+msgstr "ﺮﻈﻨﻣ"
 
 
 msgid "Radius"
@@ -6239,10 +6235,6 @@ msgstr "ﺍ.ﻥ.ﺮﻟﺍ ﺹﺍﻮﺧ ﺩﺍﺪﻋ ﻲﻓ ﺭﺎﻴﺧ ﻒﻳ�
 
 msgid "Description of the item's purpose"
 msgstr "ﺮﺼﻨﻌﻟﺍ ﺽﺮﻏ ﻒﻳﺮﻌﺗ"
-
-
-msgid "Identifier"
-msgstr "ﻑﺮﻌﻤﻟﺍ"
 
 
 msgid "Unique name used in the code and scripting"
@@ -9093,6 +9085,14 @@ msgid "Automatically adjust strength to give consistent results for different sp
 msgstr "ﺔﻔﻠﺘﺨﻤﻟﺍ ﺕﺍﺪﻋﺎﺒﺘﻠﻟ ﺔﻘﺳﺎﻨﺘﻣ ﺞﺋﺎﺘﻧ ءﺎﻄﻋﻹ﻿ ﺎﻴﺗﺍﺫ ﺓﻮﻘﻟﺍ ﻝﺪّﻋ"
 
 
+msgid "Use Unified Strength"
+msgstr "ﺓﺪﺣﻮﻣ ﺓﻮﻗ ﻡﺪﺨﺘﺳﺍ"
+
+
+msgid "Use Unified Weight"
+msgstr "ﻢﻈﺘﻨﻣ ﻥﺯﻭ ﻡﺪﺨﺘﺳﺍ"
+
+
 msgid "Vertex weight when brush is applied"
 msgstr "ﺓﺎﺷﺮﻔﻟﺍ ﻖﻴﺒﻄﺗ ﺪﻨﻋ ﺔﻄﻘﻨﻟﺍ ﻥﺯﻭ"
 
@@ -9555,10 +9555,6 @@ msgstr "ﺔﻔﻄﺸﻟﺍ ﺕﺍﺫ ﺕﺎﻴﻨﺤﻨﻤﻠﻟ ﺕﺎﺤﺘﻔ
 
 msgid "Map Taper"
 msgstr "ﺭﺎﺼﺘﺧﻹ﻿ﺍ ﻉﻮﻧ"
-
-
-msgid "Path"
-msgstr "ﺭﺎﺴﻤﻟﺍ"
 
 
 msgid "Enable the curve to become a translation path"
@@ -10659,10 +10655,6 @@ msgstr "ﻢﻜﺤﺘﻟﺍ ﺔﻜﺒﺷ ﺮﻴﺛﺄﺘﻟ ﺔﻘﺒﻄﻤﻟﺍ
 
 msgid "External .blend file from which data is linked"
 msgstr "ﺔﻄﺒﺗﺮﻣ ﺕﺎﻧﺎﻴﺒﻟﺍ ﻪﻨﻣ ﻱﺬﻟﺍ blend. ﻒﻠﻣ"
-
-
-msgid "Path to the library .blend file"
-msgstr "blend. ﻒﻠﻣ ﺔﺒﺘﻜﻤﻟ ﺭﺎﺴﻤﻟﺍ"
 
 
 msgid "Light color"
@@ -11867,6 +11859,10 @@ msgstr "ﺐﻃﺭ"
 
 msgid "Amount of damping"
 msgstr "ﻝﺅﺎﻀﺘﻟﺍ ﺔﻴﻤﻛ"
+
+
+msgid "Display"
+msgstr "ﺽﺮﻋ"
 
 
 msgid "Percentage of particles to display in 3D view"
@@ -14959,22 +14955,6 @@ msgid "Type of event"
 msgstr "ﺙﺪﺤﻟﺍ ﻉﻮﻧ"
 
 
-msgid "Press"
-msgstr "ﻊﻓﺪﻟﺍ"
-
-
-msgid "Release"
-msgstr "ﻕﻼ﻿ﻃﻹ﻿ﺍ"
-
-
-msgid "Click"
-msgstr "ﻂﻐﻀﻟﺍ"
-
-
-msgid "Double Click"
-msgstr "ﺝﻭﺩﺰﻤﻟﺍ ﻂﻐﻀﻟﺍ"
-
-
 msgid "Ease In"
 msgstr "ﺪﻳﺍﺰﺘﻟﺍ"
 
@@ -15189,6 +15169,10 @@ msgstr "ﺓﺭﺎﺘﺨﻣ ﺔﻄﻘﻨﻟﺍ"
 
 msgid "Active Object"
 msgstr "ﻝﺎﻌّﻔﻟﺍ ﻦﺋﺎﻜﻟﺍ"
+
+
+msgid "Path to the library .blend file"
+msgstr "blend. ﻒﻠﻣ ﺔﺒﺘﻜﻤﻟ ﺭﺎﺴﻤﻟﺍ"
 
 
 msgid "Modifier Name"
@@ -15684,10 +15668,6 @@ msgid "Proportional Editing Falloff"
 msgstr "ﻲﺒﺴﻨﻟﺍ ﺮﻳﺮﺤﺘﻟﺍ ﻲﺷﻼ﻿ﺗ"
 
 
-msgid "Import"
-msgstr "ﺩﺭﻮﺘﺳﺇ"
-
-
 msgid "Mirror"
 msgstr "ﻞﺛﺎﻣ"
 
@@ -15704,6 +15684,10 @@ msgid "Align View"
 msgstr "ﺮﻈﻨﻤﻟﺍ ﻱﺫﺎﺣ"
 
 
+msgid "Import"
+msgstr "ﺩﺭﻮﺘﺳﺇ"
+
+
 msgid "Align View to Active"
 msgstr "ﻝﺎﻌّﻔﻠﻟ ﺮﻈﻨﻤﻟﺍ ﻱﺫﺎﺣ"
 
@@ -15716,16 +15700,16 @@ msgid "Select Similar"
 msgstr "ﻞﺛﺎﻤﻤﻟﺍ ﺮﺘﺧﺇ"
 
 
-msgid "UV"
-msgstr "ﺭﻭﺎﺤﻣ"
-
-
 msgid "Select All by Trait"
 msgstr "ﺔﻤﺴﻟﺍ ﺐﺴﺣ ﻞﻛ ﺭﺎﻴﺘﺧﺍ"
 
 
 msgid "Select Linked"
 msgstr "ﺔﻄﺒﺗﺮﻤﻟﺍ ﺭﺎﺘﺧﺇ"
+
+
+msgid "UV"
+msgstr "ﺭﻭﺎﺤﻣ"
 
 
 msgid "Light"
@@ -15756,28 +15740,28 @@ msgid "Make Single User"
 msgstr "ﻡﺪﺨﺘﺴﻤﻟﺍ ﺪﻴﺣﻭ ﻪﻠﻌﺟﺍ"
 
 
-msgid "Layout"
-msgstr "ﻖﻴﺴﻨﺗ"
-
-
 msgid "Hooks"
 msgstr "ﺕﺎﻓﺎﻄﺧ"
 
 
-msgid "Keying"
-msgstr "ﺺﺤﻔﻟﺍ"
+msgid "Layout"
+msgstr "ﻖﻴﺴﻨﺗ"
 
 
 msgid "In-Betweens"
 msgstr "ﻦﻴﺑ ﺎﻣ"
 
 
-msgid "Tracking"
-msgstr "ﺔﻘﺣﻼ﻿ﻤﻟﺍ"
-
-
 msgid "Propagate"
 msgstr "ﻢﻤﻋ"
+
+
+msgid "Keying"
+msgstr "ﺺﺤﻔﻟﺍ"
+
+
+msgid "Tracking"
+msgstr "ﺔﻘﺣﻼ﻿ﻤﻟﺍ"
 
 
 msgctxt "MovieClip"
@@ -18228,16 +18212,8 @@ msgid "Distance between two bundles used for object scaling"
 msgstr "ﻦﺋﺎﻜﻟﺍ ﻢﻴﺠﺤﺘﻠﻟ ﻦﻴﺘﻣﺰﺣ ﻦﻴﺑ ﺔﻓﺎﺴﻤﻟﺍ"
 
 
-msgid "Double"
-msgstr "ﻒﻋﺎﻀﻣ"
-
-
 msgid "Track with half of realtime speed"
 msgstr "ﺔﻴﻘﻴﻘﺤﻟﺍ ﺔﻋﺮﺴﻟﺍ ﻒﺼﻨﺑ ﻖﺣﻻ﻿"
-
-
-msgid "Quarter"
-msgstr "ﻊﺑﺭ"
 
 
 msgid "Use Blue Channel"
@@ -18626,10 +18602,6 @@ msgstr "ﻥﻮﻠﻟﺍ ﺔﻋﻮﻤﺠﻣ"
 
 msgid "Color Spill"
 msgstr "ﻥﻮﻠﻟﺍ ﺐﻜﺳ"
-
-
-msgid "To"
-msgstr "ـﻟ"
 
 
 msgid "Has Layers"
@@ -20704,6 +20676,11 @@ msgid "Reset Transform"
 msgstr "ﻝﻮّﺤﺘﻟﺍ ﻂﺒﺿ ﺪﻋﺍ"
 
 
+msgctxt "Operator"
+msgid "Select Directory"
+msgstr "ﺭﺎﺴﻤﻟﺍ ﺮﺘﺧﺍ"
+
+
 msgid "Directory of the file"
 msgstr "ﻒﻠﻤﻟﺍ ﺪﻠّﺠﻣ"
 
@@ -21258,6 +21235,10 @@ msgstr "ﺮﻈﻨﻤﻟﺍ ﻢﻴﺠﺤﺗ ﻝﺪﻌﻣ"
 msgctxt "Operator"
 msgid "Export"
 msgstr "ﺭﺪّﺻ"
+
+
+msgid "Filepath"
+msgstr "ﻒﻠﻤﻟﺍ ﺭﺎﺴﻣ"
 
 
 msgid "Clear the scrollback history"
@@ -21919,11 +21900,6 @@ msgstr "ﺕﺎﻔﻠﻤﻟﺍ ﻞﻛ ﺮﺘﺨﺗ ﻻ﻿/ﺮﺘﺧﺍ"
 
 msgid "Select or deselect all files"
 msgstr "ﺕﺎﻔﻠﻤﻟﺍ ﻞﻛ ﺮﺘﺨﺗ ﻻ﻿ ﻭﺍ ﺮﺘﺧﺍ"
-
-
-msgctxt "Operator"
-msgid "Select Directory"
-msgstr "ﺭﺎﺴﻤﻟﺍ ﺮﺘﺧﺍ"
 
 
 msgid "Walk Direction"
@@ -23914,6 +23890,10 @@ msgid "Zoom in/out the background image"
 msgstr "ﺮﻐﺻﻻ﻿/ﺮﺒﻛﻻ﻿ ﺔﻴﻔﻠﺨﻟﺍ ﺓﺭﻮﺼﻟﺍ ﻢﺠّﺣ"
 
 
+msgid "Use Active"
+msgstr "ﻝﺎﻌّﻔﻟﺍ ﻡﺪﺨﺘﺳﺇ"
+
+
 msgctxt "Operator"
 msgid "Detach Nodes"
 msgstr "ﺪﻘﻌﻟﺍ ﻞﺼﻓﺍ"
@@ -25056,10 +25036,6 @@ msgid "Close or open all items"
 msgstr "ﺮﺻﺎﻨﻌﻟﺍ ﻞﻛ ﺢﺘﻓﺍ ﻭﺍ ﻖﻠﻏﺍ"
 
 
-msgid "Use Active"
-msgstr "ﻝﺎﻌّﻔﻟﺍ ﻡﺪﺨﺘﺳﺇ"
-
-
 msgctxt "Operator"
 msgid "Keying Set Add Selected"
 msgstr "ﺢﻴﺗﺎﻔﻤﻟﺍ ﺔﻋﻮﻤﺠﻤﻟ ﺭﺎﺘﺨﻤﻟﺍ ﻒﺿﺍ"
@@ -25914,6 +25890,10 @@ msgid "New Screen"
 msgstr "ﺓﺪﻳﺪﺟ ﺔﺷﺎﺷ"
 
 
+msgid "Active Section"
+msgstr "ﻝﺎﻌّﻔﻟﺍ ﻊﻄﻘﻤﻟﺍ"
+
+
 msgctxt "Operator"
 msgid "Redo Last"
 msgstr "ﺮﻴﺧﻻ﻿ﺍ ﺪﻋﺃ"
@@ -26522,10 +26502,6 @@ msgstr "ﻲﻟﺎﺤﻟﺍ ﺮﻄﺴﻟﺍ ﺦﺴﻧﺍ"
 
 msgid "Jump cursor to line"
 msgstr "ﺮﻄﺴﻠﻟ ﺮﺷﺆﻤﻟﺎﺑ ﺰﻔﻗﺍ"
-
-
-msgid "Filepath"
-msgstr "ﻒﻠﻤﻟﺍ ﺭﺎﺴﻣ"
 
 
 msgctxt "Operator"
@@ -27964,10 +27940,6 @@ msgid "3D Mouse Settings"
 msgstr "ﺩﺎﻌﺑﻻ﻿ﺍ ﺔﻴﺛﻼ﻿ﺜﻟﺍ ﺓﺭﺄﻔﻟﺍ ﺕﺍﺩﺍﺪﻋﺍ"
 
 
-msgid "Auto Run Python Scripts"
-msgstr "ﻥﻮﺜﻳﺎﺒﻟﺍ ﺕﺎﺘﺒﻳﺮﻜﺳ ﺎﻴﺗﺍﺫ ﻞﻐﺷ"
-
-
 msgid "Theme Space"
 msgstr "ﻂﻤﻨﻟﺍ ءﺎﻀﻓ"
 
@@ -28952,10 +28924,6 @@ msgid "Apply channel rotation as IK constraint"
 msgstr "IK ﺪﻴﻗ ﻞﻜﺷ ﻰﻠﻋ ﻥﺍﺭﻭﺪﻟﺍ ﺓﺎﻨﻗ ﻖﻴﺒﻄﺗ"
 
 
-msgid "Active Section"
-msgstr "ﻝﺎﻌّﻔﻟﺍ ﻊﻄﻘﻤﻟﺍ"
-
-
 msgid "Edit Methods"
 msgstr "ﺮﻳﺮﺤﺘﻟﺍ ﻕﺮﻃ"
 
@@ -29318,6 +29286,10 @@ msgstr "blend. ـﻟﺍ ﻒﻠﻣ ﻆﻔﺣ ﺪﻨﻋ ﻒﻠﻤﻟﺍ ﻂﻐﺿ 
 
 msgid "Load user interface setup when loading .blend files"
 msgstr "blend. ﺕﺎﻔﻠﻣ ﻞﻴﻤﺤﺗ ﺪﻨﻋ ﻡﺪﺨﺘﺴﻤﻟﺍ ﺔﻬﺟﺍﻭ ﺕﺍﺩﺍﺪﻋﺍ ﻞﻤّﺣ"
+
+
+msgid "Auto Run Python Scripts"
+msgstr "ﻥﻮﺜﻳﺎﺒﻟﺍ ﺕﺎﺘﺒﻳﺮﻜﺳ ﺎﻴﺗﺍﺫ ﻞﻐﺷ"
 
 
 msgid "Allow any .blend file to run scripts automatically (unsafe with blend files from an untrusted source)"
@@ -31329,10 +31301,6 @@ msgid "Blender File"
 msgstr "ﺭﺪﻨﻠﺑ ﻒﻠﻣ ﺮﻬﻇﺃ"
 
 
-msgid "Sort Alphabetically"
-msgstr "ﺎﻳﺪﺠﺑﺃ ﺐﺗﺭ"
-
-
 msgid "Filter method"
 msgstr "ﺔﻴﻔﺼﺘﻟﺍ ﺔﻘﻳﺮﻃ"
 
@@ -32711,16 +32679,8 @@ msgid "Instead of per-brush color, the color is shared across brushes"
 msgstr "ﺓﺎﺷﺮﻓ ﻞﻜﻟ ﻥﻮﻟ ﻦﻣ ﻻ﻿ﺪﺑ ,ﺵﺮﻔﻟﺍ ﻞﻛ ﻦﻴﺑ ﻥﻮﻠّﻟﺍ ﺔﻛﺭﺎﺸﻣ ﻢﺘﻳ"
 
 
-msgid "Use Unified Strength"
-msgstr "ﺓﺪﺣﻮﻣ ﺓﻮﻗ ﻡﺪﺨﺘﺳﺍ"
-
-
 msgid "Instead of per-brush strength, the strength is shared across brushes"
 msgstr "ﺵﺮﻔﻟﺍ ﻞﻛ ﻦﻴﺑ ﺔﻛﺮﺘﺸﻣ ﺓﻮﻘﻟﺍ ،ﺓﺎﺷﺮﻓ ﻞﻜﻟ ﺓﻮﻗ ﻝﺪﺑ"
-
-
-msgid "Use Unified Weight"
-msgstr "ﻢﻈﺘﻨﻣ ﻥﺯﻭ ﻡﺪﺨﺘﺳﺍ"
 
 
 msgid "Instead of per-brush weight, the weight is shared across brushes"
@@ -32987,6 +32947,14 @@ msgid "Occlude objects with the environment color as they are further away"
 msgstr "ﺍﻭﺪﻌﺘﺑﺍ ﺎﻤﻠﻛ ﻂﻴﺤﻤﻟﺍ ﻥﻮﻟ ﻊﻣ ﺕﺎﻨﺋﺎﻜﻟﺍ ﺱﺎﺒﺤﻧﺍ"
 
 
+msgid "Press"
+msgstr "ﻊﻓﺪﻟﺍ"
+
+
+msgid "Release"
+msgstr "ﻕﻼ﻿ﻃﻹ﻿ﺍ"
+
+
 msgid "Operator Properties"
 msgstr "ﻞﻣﺎﻌﻟﺍ ﺹﺍﻮﺧ"
 
@@ -33176,11 +33144,6 @@ msgstr "ﺓﺭﻮﺻ"
 
 
 msgctxt "WindowManager"
-msgid "UV Sculpt"
-msgstr "UV ـﻟﺍ ﺖﺤﻧ"
-
-
-msgctxt "WindowManager"
 msgid "Image Generic"
 msgstr "ﺓﺭﻮﺻ ﻡﺎﻋ"
 
@@ -33315,11 +33278,6 @@ msgid "All"
 msgstr "ﻞﻜﻟﺍ"
 
 
-msgctxt "Operator"
-msgid "Report a Bug"
-msgstr "ﺄﻄﺧ ﻎﻴﻠﺒﺗ"
-
-
 msgid "Object Index"
 msgstr "ﻦﺋﺎﻜﻟﺍ ﺮﺷﺆﻣ"
 
@@ -33374,6 +33332,11 @@ msgstr ":ﺮﻳﺬﺤﺗ"
 msgctxt "Operator"
 msgid "Documentation"
 msgstr "ﻖﻴﺛﻮﺘﻟﺍ"
+
+
+msgctxt "Operator"
+msgid "Report a Bug"
+msgstr "ﺄﻄﺧ ﻎﻴﻠﺒﺗ"
 
 
 msgid "File:"
@@ -34187,6 +34150,11 @@ msgstr "ﻲﻟﺎﺘﻟﺍ ﻂﻳﺮﺸﻟﺍ ﻰﻟﺍ ﺰﻔﻗﺍ"
 
 
 msgctxt "Operator"
+msgid "Text"
+msgstr "ﺺﻧ"
+
+
+msgctxt "Operator"
 msgid "Change Keying Set..."
 msgstr "...ﺢﻴﺗﺎﻔﻤﻟﺍ ﺔﻋﻮﻤﺠﻣ ﺮﻴﻏ"
 
@@ -34223,11 +34191,6 @@ msgstr "ﻦﻴﻤﻳ"
 msgctxt "Operator"
 msgid "Color"
 msgstr "ﻥﻮﻠﻟﺍ"
-
-
-msgctxt "Operator"
-msgid "Text"
-msgstr "ﺺﻧ"
 
 
 msgctxt "Operator"
@@ -34855,11 +34818,6 @@ msgstr "ﺩﺪﻌﺘﻣ-ﻦﻳﻮﻠﺗ"
 
 
 msgctxt "Operator"
-msgid "Quick Edit"
-msgstr "ﻊﻳﺮﺳ ﻞﻳﺪﻌﺗ"
-
-
-msgctxt "Operator"
 msgid "Apply"
 msgstr "ﻖﺒﻃ"
 
@@ -34883,6 +34841,10 @@ msgstr "!ﻞﻳﺪﻌﺘﻟﺍ ﻞﻴﻌﻔﺘﻟ ﺓﺮﻛﺍﺬﻟﺍ ﻲﻓ"
 
 msgid "KeyingSet"
 msgstr "ﺢﻴﺗﺎﻔﻤﻟﺍ ﺔﻋﻮﻤﺠﻣ"
+
+
+msgid "GP_Layer"
+msgstr "ﺕﺎﻈﺣﻼ﻿ﻣ ﺔﻘﺒﻃ"
 
 
 msgid "Const"
@@ -34932,10 +34894,6 @@ msgstr "ﺢﻄﺳ"
 
 msgid "True Normal"
 msgstr "ﻲﻘﻴﻘﺣ ﻢﻇﺎﻧ"
-
-
-msgid "GP_Layer"
-msgstr "ﺕﺎﻈﺣﻼ﻿ﻣ ﺔﻘﺒﻃ"
 
 
 msgid "Slot %d"
@@ -35275,6 +35233,10 @@ msgid "OK"
 msgstr "ﺎﻨﺴﺣ"
 
 
+msgid "Look"
+msgstr "ﺮﻈﻧﺃ"
+
+
 msgid "Delete the active position"
 msgstr "ﻲﻟﺎﺤﻟﺍ ﻊﻗﻮﻤﻟﺍ ﻑﺬﺣﺍ"
 
@@ -35297,14 +35259,6 @@ msgstr "ﺎﻃﺎﺒﻨﺘﺳﺍ ﺩﺪﻣ"
 
 msgid "Reset Curve"
 msgstr "ﻰﻨﺤﻨﻤﻟﺍ ﻂﺒﺿ ﺪﻋﺃ"
-
-
-msgid "H"
-msgstr "H"
-
-
-msgid "S"
-msgstr "S"
 
 
 msgid "Zoom in"
@@ -36462,7 +36416,7 @@ msgstr "ﺢﻴﺗﺎﻔﻤﻟﺍ ﺔﻋﻮﻤﺠﻤﻟ ﺭﺎﺘﺨﻤﻟﺍ ﻒ
 
 
 msgid "Line set '%s' could not be removed"
-msgstr "'%s‬‪' ﻂﺨﻟﺍ ﺔﻋﻮﻤﺠﻣ ﺔﻟﺍﺯﺍ ﻦﻜﻤﻳ ﻻ﻿"
+msgstr "‬'%s'‪ ﻂﺨﻟﺍ ﺔﻋﻮﻤﺠﻣ ﺔﻟﺍﺯﺍ ﻦﻜﻤﻳ ﻻ﻿"
 
 
 msgid "Modifier was not found in the stack"
@@ -36561,6 +36515,10 @@ msgid "Val"
 msgstr "ﺔﻤﻴﻘﻟﺍ"
 
 
+msgid "S"
+msgstr "S"
+
+
 msgid "Planar"
 msgstr "ﺢﻄﺳ"
 
@@ -36585,12 +36543,12 @@ msgid "BSDF"
 msgstr "BSDF"
 
 
-msgid "IOR"
-msgstr "ﺭﺎﺴﻜﻧﻻ﻿ﺍ ﻞﻣﺎﻌﻣ"
-
-
 msgid "Anisotropy"
 msgstr "ﺱﺎﻜﻌﻧﻹ﻿ﺍ ﻞﻜﺸﺗ"
+
+
+msgid "IOR"
+msgstr "ﺭﺎﺴﻜﻧﻻ﻿ﺍ ﻞﻣﺎﻌﻣ"
 
 
 msgid "RoughnessU"
@@ -36755,6 +36713,10 @@ msgstr "W3"
 
 msgid "W4"
 msgstr "W4"
+
+
+msgid "H"
+msgstr "H"
 
 
 msgid "Image too small"

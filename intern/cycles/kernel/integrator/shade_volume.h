@@ -399,6 +399,57 @@ ccl_device_inline const ccl_global KernelOctreeRoot *volume_find_octree_root(
   return kroot;
 }
 
+template<const bool shadow, typename IntegratorGenericState>
+ccl_device bool volume_octree_setup_single(KernelGlobals kg,
+                                           const ccl_private Ray *ccl_restrict ray,
+                                           ccl_private ShaderData *ccl_restrict sd,
+                                           const IntegratorGenericState state,
+                                           const ccl_private RNGState *rng_state,
+                                           const PathRayVisibility path_visibility,
+                                           const uint32_t path_flag,
+                                           ccl_private OctreeTracing &local,
+                                           const VolumeStack skip,
+                                           const int index)
+{
+  const VolumeStack entry = volume_stack_read<shadow>(state, index);
+
+  if (entry.shader == SHADER_NONE) {
+    return false;
+  }
+
+  if (entry.object == skip.object && entry.shader == skip.shader) {
+    return true;
+  }
+
+  const ccl_global KernelOctreeRoot *kroot = volume_find_octree_root(kg, entry);
+
+  local.node = &kernel_data_fetch(volume_tree_nodes, kroot->id);
+  local.entry = entry;
+
+  /* Convert to object space. */
+  float3 local_P = ray->P, local_D = ray->D;
+  if (!(kernel_data_fetch(object_flag, entry.object) & SD_OBJECT_TRANSFORM_APPLIED)) {
+    const Transform itfm = object_fetch_transform(kg, entry.object, OBJECT_INVERSE_TRANSFORM);
+    local_P = transform_point(&itfm, ray->P);
+    local_D = transform_direction(&itfm, ray->D);
+  }
+
+  /* Convert to octree space. */
+  if (local.to_octree_space(local_P, local_D, kroot->scale, kroot->translation)) {
+    volume_voxel_get(kg, local);
+    local.t.max = local.ray_voxel_intersect(ray->tmax);
+  }
+  else {
+    /* Current ray segment lies outside of the octree, usually happens with implicit volume, i.e.
+     * everything behind a surface is considered as volume. */
+    local.t.max = ray->tmax;
+  }
+
+  local.sigma = volume_object_get_extrema<shadow>(
+      kg, ray, sd, state, local, rng_state, path_visibility, path_flag);
+  return true;
+}
+
 /* Find the current active ray segment.
  * We might have multiple overlapping octrees, so find the smallest `tmax` of all and store the
  * information of that octree in `OctreeTracing`.
@@ -423,43 +474,14 @@ ccl_device bool volume_octree_setup(KernelGlobals kg,
   int i = 0;
   for (;; i++) {
     /* Loop through all the object in the volume stack and find their octrees. */
-    const VolumeStack entry = volume_stack_read<shadow>(state, i);
-
-    if (entry.shader == SHADER_NONE) {
+    OctreeTracing local(global.t.min);
+    if (!volume_octree_setup_single<shadow>(
+            kg, ray, sd, state, rng_state, path_visibility, path_flag, local, skip, i))
+    {
       break;
     }
 
-    if (entry.object == skip.object && entry.shader == skip.shader) {
-      continue;
-    }
-
-    const ccl_global KernelOctreeRoot *kroot = volume_find_octree_root(kg, entry);
-
-    OctreeTracing local(global.t.min);
-    local.node = &kernel_data_fetch(volume_tree_nodes, kroot->id);
-    local.entry = entry;
-
-    /* Convert to object space. */
-    float3 local_P = ray->P, local_D = ray->D;
-    if (!(kernel_data_fetch(object_flag, entry.object) & SD_OBJECT_TRANSFORM_APPLIED)) {
-      const Transform itfm = object_fetch_transform(kg, entry.object, OBJECT_INVERSE_TRANSFORM);
-      local_P = transform_point(&itfm, ray->P);
-      local_D = transform_direction(&itfm, ray->D);
-    }
-
-    /* Convert to octree space. */
-    if (local.to_octree_space(local_P, local_D, kroot->scale, kroot->translation)) {
-      volume_voxel_get(kg, local);
-      local.t.max = local.ray_voxel_intersect(ray->tmax);
-    }
-    else {
-      /* Current ray segment lies outside of the octree, usually happens with implicit volume, i.e.
-       * everything behind a surface is considered as volume. */
-      local.t.max = ray->tmax;
-    }
-
-    global.sigma += volume_object_get_extrema<shadow>(
-        kg, ray, sd, state, local, rng_state, path_visibility, path_flag);
+    global.sigma += local.sigma;
     if (local.t.max <= global.t.max) {
       /* Replace the current active octree with the one that has the smallest `tmax`. */
       local.sigma = global.sigma;
@@ -715,7 +737,7 @@ ccl_device void volume_shadow_null_scattering(KernelGlobals kg,
   }
 }
 
-/* Equi-angular sampling as in:
+/* Equiangular sampling as in:
  * "Importance Sampling Techniques for Path Tracing in Participating Media" */
 
 /* Below this pdf we ignore samples, as they tend to lead to very long distances.
@@ -2613,6 +2635,7 @@ ccl_device_forceinline bool integrate_volume_phase_scatter(
     label = volume_shader_phase_guided_sample(kg,
                                               state,
                                               sd,
+                                              phases,
                                               svc,
                                               rand_phase,
                                               &phase_eval,
@@ -2631,7 +2654,7 @@ ccl_device_forceinline bool integrate_volume_phase_scatter(
 #  endif
   {
     label = volume_shader_phase_sample(
-        sd, svc, rand_phase, &phase_eval, &phase_wo, &phase_pdf, &sampled_roughness);
+        sd, phases, svc, rand_phase, &phase_eval, &phase_wo, &phase_pdf, &sampled_roughness);
 
     if (phase_pdf == 0.0f || bsdf_eval_is_zero(&phase_eval)) {
       return false;
@@ -2719,8 +2742,8 @@ volume_integrate_event(KernelGlobals kg,
   const uint32_t path_flag = INTEGRATOR_STATE(state, path, flag);
   const float continuation_probability = (path_flag & PATH_RAY_TERMINATE_IN_NEXT_VOLUME) ?
                                              0.0f :
-                                             INTEGRATOR_STATE(
-                                                 state, path, continuation_probability);
+                                             float(INTEGRATOR_STATE(
+                                                 state, path, continuation_probability));
   if (continuation_probability == 0.0f) {
     return VOLUME_PATH_MISSED;
   }
@@ -2732,10 +2755,9 @@ volume_integrate_event(KernelGlobals kg,
 #  if defined(__PATH_GUIDING__)
     if (kernel_data.integrator.use_guiding) {
 #    if PATH_GUIDING_LEVEL >= 1
-      if (result.direct_sample_method == VOLUME_SAMPLE_DISTANCE) {
-        /* If the direct scatter event is generated using VOLUME_SAMPLE_DISTANCE the direct event
-         * will happen at the same position as the indirect event and the direct light contribution
-         * will contribute to the position of the next path segment. */
+      if (result.indirect_scatter && result.direct_t == result.indirect_t) {
+        /* If the direct and indirect distances are the same the path will continue at the
+         * position of the direct event and we generate a new path segment at this position. */
         const float3 transmittance_weight = spectrum_to_rgb(
             safe_divide_color(result.indirect_throughput, initial_throughput));
         guiding_record_volume_transmission(kg, state, transmittance_weight);
@@ -2744,11 +2766,11 @@ volume_integrate_event(KernelGlobals kg,
         unlit_throughput = result.indirect_throughput / continuation_probability;
         rand_phase_guiding = path_state_rng_1D(kg, rng_state, PRNG_VOLUME_PHASE_GUIDING_DISTANCE);
       }
-      else if (result.direct_sample_method == VOLUME_SAMPLE_EQUIANGULAR) {
-        /* If the direct scatter event is generated using VOLUME_SAMPLE_EQUIANGULAR the direct
-         * event will happen at a separate position as the indirect event and the direct light
-         * contribution will contribute to the position of the current/previous path segment. The
-         * unlit_throughput has to be adjusted to include the scattering at the previous segment.
+      else {
+        /* If the direct scattering event is not at the same distance as the indirect one, the
+         * direct light event will contribute to the out-scattered contribution of the current path
+         * segment and not to the incoming radiance from the segment direction. We therefore need
+         * to adjust the unlit_throughput to include the scattering at the previous path vertex.
          */
         float3 scatterEval = one_float3();
         if (INTEGRATOR_STATE(state, guiding, path_segment)) {
@@ -2764,6 +2786,7 @@ volume_integrate_event(KernelGlobals kg,
 #    endif
 #    if PATH_GUIDING_LEVEL >= 4
       if ((kernel_data.kernel_features & KERNEL_FEATURE_PATH_GUIDING)) {
+        /* Initialize the guiding distribution at the direct scattering event position. */
         volume_shader_prepare_guiding(
             kg, state, rand_phase_guiding, direct_P, ray->D, &result.direct_phases);
       }
@@ -2812,9 +2835,9 @@ volume_integrate_event(KernelGlobals kg,
       }
 #    endif
 #    if PATH_GUIDING_LEVEL >= 4
-      /* If the direct scatter event was generated using VOLUME_SAMPLE_EQUIANGULAR we need to
-       * initialize the guiding distribution at the indirect scatter position. */
-      if (result.direct_sample_method == VOLUME_SAMPLE_EQUIANGULAR) {
+      /* If the direct and indirect event do not have the same distance the guiding
+       * distribution needs to be initialized at the indirect scattering position. */
+      if (!result.direct_scatter || result.direct_t != result.indirect_t) {
         rand_phase_guiding = path_state_rng_1D(kg, rng_state, PRNG_VOLUME_PHASE_GUIDING_DISTANCE);
         volume_shader_prepare_guiding(
             kg, state, rand_phase_guiding, sd->P, ray->D, &result.indirect_phases);

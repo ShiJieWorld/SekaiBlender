@@ -179,7 +179,7 @@ bool insert_keyframe_direct(ReportList *reports,
     return false;
   }
 
-  if ((ptr.owner_id == nullptr) && (ptr.data == nullptr)) {
+  if (!ptr) {
     BKE_report(
         reports, RPT_ERROR, "No RNA pointer available to retrieve values for keyframing from");
     return false;
@@ -188,7 +188,7 @@ bool insert_keyframe_direct(ReportList *reports,
   if (prop == nullptr) {
     PointerRNA tmp_ptr;
 
-    if (RNA_path_resolve_property(&ptr, fcu->rna_path().c_str(), &tmp_ptr, &prop) == false) {
+    if (RNA_path_resolve_property(&ptr, fcu->rna_path_parsed(), &tmp_ptr, &prop) == false) {
       const char *idname = (ptr.owner_id) ? ptr.owner_id->name : RPT_("<No ID pointer>");
 
       BKE_reportf(reports,

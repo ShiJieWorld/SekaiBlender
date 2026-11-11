@@ -2,6 +2,10 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup nodes
+ */
+
 #include "BKE_context.hh"
 
 #include "BLI_array.hh"
@@ -106,7 +110,7 @@ static void draw_property_for_socket(DrawGroupInputsContext &ctx,
     return;
   }
 
-  std::string name = socket.name ? IFACE_(socket.name) : "";
+  std::string name = IFACE_(socket.name());
 
   /* If the property has a prefix that's the same string as the name of the panel it's in, remove
    * the prefix so it appears less verbose. */
@@ -364,7 +368,7 @@ void draw_compositor_nodes_effect_ui(const bContext &C, PointerRNA *strip_ptr, u
   PointerRNA bmain_ptr = RNA_main_pointer_create(bmain);
   Scene *sequencer_scene = CTX_data_sequencer_scene(&C);
   PointerRNA properties_ptr = RNA_pointer_get(strip_ptr, "properties");
-  if (properties_ptr.data == nullptr) {
+  if (!properties_ptr) {
     return;
   }
 

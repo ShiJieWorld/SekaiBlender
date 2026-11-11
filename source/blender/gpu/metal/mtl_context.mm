@@ -64,6 +64,8 @@ using namespace blender::gpu;
 
 namespace blender::gpu {
 
+static CLG_LogRef LOG = {"gpu.metal"};
+
 /* Global memory manager. */
 std::mutex MTLContext::global_memory_manager_reflock;
 int MTLContext::global_memory_manager_refcount = 0;
@@ -1957,7 +1959,9 @@ id<MTLComputePipelineState> MTLContextComputeUtils::get_buffer_clear_pso()
       if ([[error localizedDescription] rangeOfString:@"Compilation succeeded"].location ==
           NSNotFound)
       {
-        NSLog(@"Compile Error - Metal Shader Library error %@ ", error);
+        CLOG_ERROR(&LOG,
+                   "Compile Error - Metal Shader Library error %s",
+                   [[error localizedDescription] UTF8String]);
         BLI_assert(false);
         return nil;
       }
@@ -1973,7 +1977,9 @@ id<MTLComputePipelineState> MTLContextComputeUtils::get_buffer_clear_pso()
     buffer_clear_pso_ = [ctx->device newComputePipelineStateWithFunction:temp_compute_function
                                                                    error:&error];
     if (error || buffer_clear_pso_ == nil) {
-      NSLog(@"Failed to prepare compute_buffer_clear MTLComputePipelineState %@", error);
+      CLOG_ERROR(&LOG,
+                 "Failed to prepare compute_buffer_clear MTLComputePipelineState %s",
+                 [[error localizedDescription] UTF8String]);
       BLI_assert(false);
       return nil;
     }
@@ -2030,6 +2036,13 @@ void present(MTLRenderPassDescriptor *blit_descriptor,
   id<MTLCommandBuffer> cmdbuf = [ctx->queue commandBuffer];
   ctx->main_command_buffer.inc_active_command_buffer_count();
 
+  /* Ensure freed buffers have usage tracked against active CommandBuffer submissions. Referenced
+   * from creation until completion of the command buffer, like
+   * #MTLCommandBufferManager::ensure_begin. */
+  MTLSafeFreeList *cmd_free_buffer_list =
+      MTLContext::get_global_memory_manager()->acquire_current_safe_list();
+  BLI_assert(cmd_free_buffer_list);
+
   /* Do Present Call and final Blit to MTLDrawable. */
   id<MTLRenderCommandEncoder> enc = [cmdbuf renderCommandEncoderWithDescriptor:blit_descriptor];
   [enc setRenderPipelineState:blit_pso];
@@ -2041,17 +2054,11 @@ void present(MTLRenderPassDescriptor *blit_descriptor,
   BLI_assert(drawable);
   [cmdbuf presentDrawable:drawable];
 
-  /* Ensure freed buffers have usage tracked against active CommandBuffer submissions. */
-  MTLSafeFreeList *cmd_free_buffer_list =
-      MTLContext::get_global_memory_manager()->get_current_safe_list();
-  BLI_assert(cmd_free_buffer_list);
-
   /* Increment drawables in flight limiter. */
   MTLContext::max_drawables_in_flight++;
   std::chrono::time_point submission_time = std::chrono::high_resolution_clock::now();
 
-  /* Increment free pool reference and decrement upon command buffer completion. */
-  cmd_free_buffer_list->increment_reference();
+  /* Decrement free pool reference upon command buffer completion. */
   [cmdbuf addCompletedHandler:^(id<MTLCommandBuffer> /*cb*/) {
     /* Flag freed buffers associated with this CMD buffer as ready to be freed. */
     cmd_free_buffer_list->decrement_reference();
@@ -2083,7 +2090,7 @@ void present(MTLRenderPassDescriptor *blit_descriptor,
     [cmdbuf waitUntilCompleted];
     NSError *error = [cmdbuf error];
     if (error != nil) {
-      NSLog(@"%@", error);
+      CLOG_ERROR(&LOG, "Command buffer error: %s", [[error localizedDescription] UTF8String]);
       BLI_assert(false);
     }
   }

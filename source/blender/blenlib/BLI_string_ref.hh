@@ -32,10 +32,10 @@
  */
 
 #include <cstring>
-#include <fmt/ranges.h>
 #include <string>
 #include <string_view>
 
+#include "BLI_compiler_attrs.hh"
 #include "BLI_span.hh"
 
 namespace blender {
@@ -48,12 +48,16 @@ class StringRef;
  */
 class StringRefBase {
  protected:
+  /* May be nullptr when used in StringRef. */
   const char *data_;
   int64_t size_;
 
   constexpr StringRefBase(const char *data, int64_t size);
 
  public:
+  /** Makes this type "string-like" for some libraries (e.g. `fmt`). */
+  using value_type = char;
+
   /** Similar to #string_view::npos, but signed. */
   static constexpr int64_t not_found = -1;
 
@@ -141,9 +145,9 @@ class StringRefNull : public StringRefBase {
 
  public:
   constexpr StringRefNull();
-  constexpr StringRefNull(const char *str, int64_t size);
+  constexpr StringRefNull(const char *str, int64_t size) ATTR_NONNULL(2);
   StringRefNull(std::nullptr_t) = delete;
-  constexpr StringRefNull(const char *str);
+  constexpr StringRefNull(const char *str) ATTR_NONNULL(2);
   StringRefNull(const std::string &str);
 
   constexpr char operator[](int64_t index) const;
@@ -154,6 +158,9 @@ class StringRefNull : public StringRefBase {
  * References a const char array. It might not be null terminated.
  *
  * StringRef can be compared with StringRef and StringRefNull.
+ *
+ * \note It is valid to pass `nullptr` to the constructor, as it can be used to indicate an empty
+ * string.
  */
 class StringRef : public StringRefBase {
  public:
@@ -505,7 +512,7 @@ constexpr StringRefNull::StringRefNull(const char *str, const int64_t size)
 constexpr StringRefNull::StringRefNull(const char *str)
     : StringRefBase(str, int64_t(std::char_traits<char>::length(str)))
 {
-  BLI_assert(str != nullptr);
+  BLI_assert(data_ != nullptr);
   BLI_assert(data_[size_] == '\0');
 }
 
@@ -718,14 +725,3 @@ inline std::string_view format_as(StringRef str)
 /** \} */
 
 }  // namespace blender
-
-/**
- * Disable conflicting range formatter in fmtlib. Otherwise we will get compile errors
- * where fmtlib doesn't know if it should use the formatter from format.h or ranges.h.
- */
-namespace fmt {
-
-template<> struct is_range<blender::StringRef, char> : std::false_type {};
-template<> struct is_range<blender::StringRefNull, char> : std::false_type {};
-
-}  // namespace fmt

@@ -23,6 +23,8 @@
 
 #include "BLI_enum_flags.hh"
 
+#include <optional>
+
 namespace blender {
 
 struct MovieClip;
@@ -279,12 +281,12 @@ struct StripTransform {
 
 struct StripColorBalance {
   eModColorBalanceMethod method = SEQ_COLOR_BALANCE_METHOD_LIFTGAMMAGAIN;
-  float lift[3] = {};
-  float gamma[3] = {};
-  float gain[3] = {};
-  float slope[3] = {};
-  float offset[3] = {};
-  float power[3] = {};
+  float lift[3] = {1.0, 1.0, 1.0};
+  float gamma[3] = {1.0, 1.0, 1.0};
+  float gain[3] = {1.0, 1.0, 1.0};
+  float slope[3] = {1.0, 1.0, 1.0};
+  float offset[3] = {1.0, 1.0, 1.0};
+  float power[3] = {1.0, 1.0, 1.0};
   eModColorBalanceInverseFlag flag = SEQ_COLOR_BALANCE_INVERSE_NONE;
   char _pad[4] = {};
 };
@@ -313,6 +315,11 @@ struct StripData {
    * NULL for all other strip-types.
    */
   StripElem *stripdata = nullptr;
+  /* The size of the `stripdata` array. */
+  int stripdata_num = 0;
+
+  char _pad[4] = {};
+
   char dirpath[/*FILE_MAXDIR*/ 768] = "";
   StripProxy *proxy = nullptr;
   StripCrop *crop = nullptr;
@@ -532,12 +539,11 @@ struct Strip {
    */
   void channel_set(int channel);
   /**
-   * Test if this strip intersects with timeline frame.
-   * \note This checks if strip would be rendered at this frame. For rendering it is assumed, that
-   * timeline frame has width of 1 frame and therefore ends at timeline_frame + 1
+   * Test if this strip would be rendered at the given frame.
    *
-   * \param timeline_frame: absolute frame position
-   * \return true if strip intersects with timeline frame.
+   * \param timeline_frame: absolute frame in the timeline
+   * \return true if \a timeline_frame exists in the strip's [start_frame, end_frame) range,
+   * i.e., inclusive start and exclusive end.
    */
   bool intersects_frame(const Scene *scene, int timeline_frame) const;
   /**
@@ -683,6 +689,9 @@ struct Editing {
   /** Access currently displayed channels, from root sequence or a meta-strip. */
   ListBaseT<SeqTimelineChannel> *current_channels();
   ListBaseT<SeqTimelineChannel> *current_channels() const;
+
+  std::optional<int> edit_point() const;
+  void edit_point_set(Scene *scene, std::optional<int> frame);
 #endif
 };
 
@@ -993,16 +1002,16 @@ struct SequencerMaskModifierData {
 struct WhiteBalanceModifierData {
   StripModifierData modifier;
 
-  float white_value[3] = {};
+  float white_value[3] = {1.0f, 1.0f, 1.0f};
   char _pad[4] = {};
 };
 
 struct SequencerTonemapModifierData {
   StripModifierData modifier;
 
-  float key = 0, offset = 0, gamma = 0;
-  float intensity = 0, contrast = 0, adaptation = 0, correction = 0;
-  eModTonemapType type = SEQ_TONEMAP_RH_SIMPLE;
+  float key = 0.18f, offset = 1.0f, gamma = 1.0f;
+  float intensity = 0, contrast = 0, adaptation = 1.0f, correction = 0;
+  eModTonemapType type = SEQ_TONEMAP_RD_PHOTORECEPTOR;
 };
 
 struct SequencerCompositorModifierData {

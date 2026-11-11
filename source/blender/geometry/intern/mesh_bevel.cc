@@ -2,6 +2,10 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup geo
+ */
+
 #include <algorithm>
 #include <memory>
 #include <optional>
@@ -457,8 +461,10 @@ class ExtendableMesh {
       new_face_kinds_.last() = kind;
     }
   }
-  /** Tags a new edge by its combined (original + new) index with the given kind.
-   * Only new edges (index >= mesh.edges_num) are tagged; original edges are silently ignored. */
+  /**
+   * Tags a new edge by its combined (original + new) index with the given kind.
+   * Only new edges (index >= mesh.edges_num) are tagged; original edges are silently ignored.
+   */
   void tag_edge_kind(const int edge_index, const NewEdgeKind kind)
   {
     const int ni = edge_index - mesh.edges_num;
@@ -976,8 +982,10 @@ struct BevelState {
   bool mark_seam;
   bool mark_sharp;
 
-  /** Source-edge indices of the two outer edges of each bevel strip, accumulated during
-   * #bevel_build_edge_polygons for use by the #BevelAttributeOutputs `outer_edge_id` field. */
+  /**
+   * Source-edge indices of the two outer edges of each bevel strip, accumulated during
+   * #bevel_build_edge_polygons for use by the #BevelAttributeOutputs `outer_edge_id` field.
+   */
   Vector<int> outer_edge_src_indices;
 
   VMeshMethod vmesh_method;
@@ -5534,7 +5542,7 @@ static void build_vmesh(BevelState &state, BevVert *bv)
       for (int i = 0; i < n; i++) {
         for (int j = 0; j <= ns2; j++) {
           for (int k = 0; k <= ns; k++) {
-            if (j == 0 && (k == 0 || k == ns)) {
+            if (j == 0 && ELEM(k, 0, ns)) {
               continue; /* Boundary corners already created. */
             }
             if (!geom::is_canon(vm, i, j, k)) {
@@ -6977,6 +6985,11 @@ struct NewCornerInterpData {
 struct NewCornerInterpWeights {
   Array<int> src_faces;
   Array<int> offsets;
+  /**
+   * The source corner for every weight. It's theoretically unnecessary to store this but it
+   * allows using #mix_groups directly.
+   */
+  Array<int> src_corners;
   Array<float> weights;
 
   Span<float> weights_for(const int nc) const
@@ -7057,6 +7070,7 @@ static NewCornerInterpWeights compute_new_corner_interp_weights(const Extendable
 
   const OffsetIndices<int> corner_offsets = offset_indices::accumulate_counts_to_offsets(
       data.offsets);
+  data.src_corners = Array<int>(corner_offsets.total_size());
   data.weights = Array<float>(corner_offsets.total_size());
 
   /* Pass 2: compute weights directly into each corner's slice of the flattened array. */
@@ -7064,6 +7078,9 @@ static NewCornerInterpWeights compute_new_corner_interp_weights(const Extendable
     if (data.src_faces[nc] == -1) {
       continue;
     }
+    array_utils::fill_index_range<int>(
+        data.src_corners.as_mutable_span().slice(corner_offsets[nc]),
+        emesh.src_faces[data.src_faces[nc]].start());
     compute_face_interp_weights(emesh,
                                 data.src_faces[nc],
                                 co[nc],
@@ -7074,39 +7091,22 @@ static NewCornerInterpWeights compute_new_corner_interp_weights(const Extendable
 }
 
 static void interpolate_new_corner_attribute_from_faces(
-    const ExtendableMesh &emesh,
-    const NewCornerInterpWeights &interp_weights,
-    const GVArraySpan &src,
-    GMutableSpan dst)
+    const NewCornerInterpWeights &interp_weights, const GSpan src, GMutableSpan dst)
 {
-  const CPPType &type = src.type();
-  Vector<int64_t> corners_no_src;
-
-  bke::attribute_math::to_static_type(type, [&]<typename T>() {
-    const Span<T> src_values = src.typed<T>();
-    MutableSpan<T> dst_values = dst.typed<T>();
-    bke::attribute_math::DefaultMixer<T> mixer(dst_values);
-
-    for (const int nc : interp_weights.src_faces.index_range()) {
-      const int src_face = interp_weights.src_faces[nc];
-      if (src_face == -1) {
-        corners_no_src.append(nc);
-        continue;
-      }
-      const IndexRange face_corners = emesh.src_faces[src_face];
-      const Span<float> weights = interp_weights.weights_for(nc);
-      BLI_assert(weights.size() == face_corners.size());
-      for (const int i : face_corners.index_range()) {
-        mixer.mix_in(nc, src_values[face_corners[i]], weights[i]);
-      }
-    }
-
-    mixer.finalize();
-  });
+  bke::attribute_math::mix_groups(src,
+                                  OffsetIndices<int>(interp_weights.offsets),
+                                  interp_weights.src_corners,
+                                  interp_weights.weights.as_span(),
+                                  dst);
 
   IndexMaskMemory memory;
-  const IndexMask corners_no_src_mask = IndexMask::from_indices(corners_no_src.as_span(), memory);
-  type.fill_assign_indices(type.default_value(), dst.data(), corners_no_src_mask);
+  const IndexMask corners_no_src = IndexMask::from_predicate(
+      interp_weights.src_faces.index_range(),
+      memory,
+      [&](const int64_t corner) { return interp_weights.src_faces[corner] == -1; },
+      exec_mode::grain_size(4096));
+  const CPPType &type = src.type();
+  type.fill_assign_indices(type.default_value(), dst.data(), corners_no_src);
 }
 
 /**
@@ -7249,7 +7249,7 @@ static void merge_uvs(BevelState &state)
       }
 
       /* For each new corner, determine which bucket its face representative's source corner
-       * at origin_v belongs to.  Use a simple scan since bucket count is tiny (valence). */
+       * at origin_v belongs to.  Use a simple scan since bucket count is tiny (<= valence). */
       for (const UVVertBucket &bucket : *buckets) {
         /* Collect new corners in this bucket: their face rep has a source corner at origin_v
          * that is in this bucket. */
@@ -7383,6 +7383,30 @@ static void bevel_extend_edge_data(BevelState &state)
       }
     } while (bcur != start);
   }
+}
+
+static bool try_propagate_single_value(const bke::AttributeIter &iter,
+                                       const GVArray &src,
+                                       const IndexMask &edges_new_no_src,
+                                       bke::MutableAttributeAccessor &dst_attrs)
+{
+  const CommonVArrayInfo src_info = src.common_info();
+  if (src_info.type != CommonVArrayInfo::Type::Single) {
+    return false;
+  }
+
+  if (iter.domain == bke::AttrDomain::Edge && !edges_new_no_src.is_empty()) {
+    /* A non-default single edge value cannot be kept when source-less new edges must get the
+     * type default value. */
+    const CPPType &type = src.type();
+    if (!type.is_equal_or_false(src_info.data, type.default_value())) {
+      return false;
+    }
+  }
+
+  const GPointer value(src.type(), src_info.data);
+  dst_attrs.add(iter.name, iter.domain, iter.data_type, bke::AttributeInitValue(value));
+  return true;
 }
 
 static std::optional<Mesh *> build_output_mesh(const BevelState &state,
@@ -7537,10 +7561,7 @@ static std::optional<Mesh *> build_output_mesh(const BevelState &state,
     }
     const GVArray src = *iter.get();
     const CPPType &type = src.type();
-    const CommonVArrayInfo src_info = src.common_info();
-    if (src_info.type == CommonVArrayInfo::Type::Single) {
-      const GPointer value(src.type(), src_info.data);
-      dst_attrs.add(iter.name, iter.domain, iter.data_type, bke::AttributeInitValue(value));
+    if (try_propagate_single_value(iter, src, edges_new_no_src, dst_attrs)) {
       return;
     }
     bke::GSpanAttributeWriter dst = dst_attrs.lookup_or_add_for_write_only_span(
@@ -7578,7 +7599,7 @@ static std::optional<Mesh *> build_output_mesh(const BevelState &state,
         bke::attribute_math::gather_group_to_group(
             src_faces, dst_faces, src_survive_faces, src_span, surv_values);
 
-        interpolate_new_corner_attribute_from_faces(emesh, interp_weights, src_span, new_values);
+        interpolate_new_corner_attribute_from_faces(interp_weights, src_span, new_values);
 
         break;
       }

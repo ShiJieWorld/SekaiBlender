@@ -79,7 +79,7 @@ static IDProperty *build_pose_snapshot_property(const Object *armature, int &r_b
   bPose *pose = armature->pose;
   int bone_count = 0;
   if (pose != nullptr) {
-    for (bPoseChannel *pchan = static_cast<bPoseChannel *>(pose->chanbase.first); pchan != nullptr;
+    for (bPoseChannel *pchan = static_cast<bPoseChannel *>(pose->chanbase.first()); pchan != nullptr;
          pchan = pchan->next) {
       bone_count++;
     }
@@ -111,7 +111,7 @@ static IDProperty *build_pose_snapshot_property(const Object *armature, int &r_b
 
   if (pose != nullptr) {
     int idx = 0;
-    for (bPoseChannel *pchan = static_cast<bPoseChannel *>(pose->chanbase.first); pchan != nullptr;
+    for (bPoseChannel *pchan = static_cast<bPoseChannel *>(pose->chanbase.first()); pchan != nullptr;
          pchan = pchan->next, idx++) {
       const std::string item_name = "pose_bone_" + std::to_string(idx);
       IDProperty *item = blender::bke::idprop::create_group(item_name.c_str()).release();
@@ -221,7 +221,7 @@ bool read_pose_snapshot(const ID &owner, PMXPoseSnapshot &r_snapshot)
     r_snapshot.captured_at_frame = IDP_int_get(frame_prop);
   }
 
-  for (IDProperty *item = static_cast<IDProperty *>(snapshot->data.group.first); item != nullptr;
+  for (IDProperty *item = static_cast<IDProperty *>(snapshot->data.group.first()); item != nullptr;
        item = item->next) {
     if (item->type != IDP_GROUP) {
       continue;

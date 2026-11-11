@@ -4,6 +4,8 @@
 
 出厂 **不** 启动弹窗、**不** 自动听端口。用户在偏好设置里点过「启动 Local AI Bridge」之后，本机才出现控制面。AI **不替用户开端口**，只指路。
 
+手动启动一次会自动记住（Auto Start），下次开 SekaiBlender 直接监听；不想自动开就在偏好设置里取消 Auto Start。
+
 ## 两只手
 
 | | 何时 | 怎么做 |
@@ -39,6 +41,7 @@
 `code` 里的文件路径必须先 `json.dumps`，再插进脚本（Windows 反斜杠、括号目录会弄碎字符串）。
 
 超时：identify / scene_info 30s；导入 ≥180s；截图 ≥60s。`receive_timeout` 或断连 → 当作 **unknown**（对面可能还在跑）。**禁止自动把同一请求再发一遍。**
+桥内置执行看门狗（偏好设置 Execution Timeout，默认 600s；MCP 服务端会按自身超时传更短期限）：死循环/超长代码会被中断并返回错误，不会永久卡死界面。长导入/烘焙需要提高该值。
 
 调用 operator 必须 `EXEC_DEFAULT`。`INVOKE_DEFAULT` 会弹出文件选择器，TCP 会挂死。
 

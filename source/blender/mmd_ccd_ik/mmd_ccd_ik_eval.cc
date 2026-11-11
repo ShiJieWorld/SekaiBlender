@@ -88,11 +88,11 @@ struct ConstraintRestore {
 static void mute_approx_constraints(Object &armature_obj,
                                     std::vector<ConstraintRestore> &r_restore)
 {
-  for (bPoseChannel *pchan = static_cast<bPoseChannel *>(armature_obj.pose->chanbase.first);
+  for (bPoseChannel *pchan = static_cast<bPoseChannel *>(armature_obj.pose->chanbase.first());
        pchan != nullptr;
        pchan = pchan->next)
   {
-    for (bConstraint *con = static_cast<bConstraint *>(pchan->constraints.first);
+    for (bConstraint *con = static_cast<bConstraint *>(pchan->constraints.first());
          con != nullptr;
          con = con->next)
     {
@@ -172,7 +172,7 @@ static void v8_build_bone_pool_topological(
     std::map<bPoseChannel *, int> &r_bone_index)
 {
   std::vector<Bone *> stack;
-  for (Bone *bone = static_cast<Bone *>(arm->bonebase.first); bone != nullptr;
+  for (Bone *bone = static_cast<Bone *>(arm->bonebase.first()); bone != nullptr;
        bone = bone->next)
   {
     stack.push_back(bone);
@@ -185,7 +185,7 @@ static void v8_build_bone_pool_topological(
       r_bone_index[pchan] = int(r_bone_pool.size());
       r_bone_pool.push_back(pchan);
     }
-    for (Bone *child = static_cast<Bone *>(bone->childbase.first); child != nullptr;
+    for (Bone *child = static_cast<Bone *>(bone->childbase.first()); child != nullptr;
          child = child->next)
     {
       stack.push_back(child);
@@ -216,7 +216,7 @@ static void v8_propagate_descendants_fk(Depsgraph *depsgraph,
                                          Bone &parent_bone,
                                          bool publish_to_original)
 {
-  for (Bone *child = static_cast<Bone *>(parent_bone.childbase.first); child != nullptr;
+  for (Bone *child = static_cast<Bone *>(parent_bone.childbase.first()); child != nullptr;
        child = child->next)
   {
     bPoseChannel *pchan = BKE_pose_channel_find_name(armature_obj.pose, child->name);
@@ -270,7 +270,7 @@ static void v8_refresh_pose_tree_recursive(Depsgraph *depsgraph,
       mmd_ccd_ik_sync_pose_channel(armature_obj, *pchan, publish_to_original);
     }
     v8_refresh_pose_tree_recursive(
-        depsgraph, scene, armature_obj, static_cast<Bone *>(cur->childbase.first), v8_links, publish_to_original);
+        depsgraph, scene, armature_obj, static_cast<Bone *>(cur->childbase.first()), v8_links, publish_to_original);
   }
 }
 
@@ -287,7 +287,7 @@ static void v8_refresh_pose_tree_after_solve(Depsgraph *depsgraph,
   v8_refresh_pose_tree_recursive(depsgraph,
                                  scene,
                                  armature_obj,
-                                 static_cast<Bone *>(arm->bonebase.first),
+                                 static_cast<Bone *>(arm->bonebase.first()),
                                  v8_links,
                                  publish_to_original);
 }

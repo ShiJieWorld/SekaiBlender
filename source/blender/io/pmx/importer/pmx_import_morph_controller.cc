@@ -157,7 +157,7 @@ static KeyBlock *find_or_add_key_block(Main *bmain, Mesh *mesh, const char *name
     key->type = KEY_RELATIVE;
   }
 
-  if (!key->block.first) {
+  if (!key->block.first()) {
     KeyBlock *basis = BKE_keyblock_add(key, "Basis");
     BKE_keyblock_convert_from_mesh(mesh, key, basis);
   }

@@ -29,12 +29,13 @@
 #include "RNA_access.hh"
 #include "RNA_define.hh"
 #include "RNA_enum_types.hh"
+#include "RNA_prototypes.hh"
 
 #include "BKE_animsys.hh"
+#include "BKE_annotations.h"
 #include "BKE_context.hh"
 #include "BKE_fcurve.hh"
 #include "BKE_global.hh"
-#include "BKE_gpencil_legacy.h"
 #include "BKE_grease_pencil.hh"
 #include "BKE_nla.hh"
 #include "BKE_report.hh"
@@ -120,7 +121,7 @@ static wmOperatorStatus act_markers_make_local_exec(bContext *C, wmOperator * /*
   }
 
   /* migrate markers */
-  for (marker = static_cast<TimeMarker *>(markers->first); marker; marker = markern) {
+  for (marker = markers->first(); marker; marker = markern) {
     markern = marker->next;
 
     /* move if marker is selected */
@@ -182,7 +183,7 @@ static bool get_keyframe_extents(bAnimContext *ac, float *min, float *max, const
   *max = -999999999.0f;
 
   /* check if any channels to set range with */
-  if (anim_data.first) {
+  if (anim_data.first_) {
     /* go through channels, finding max extents */
     for (bAnimListElem &ale : anim_data) {
       if (ale.datatype == ALE_GPFRAME) {
@@ -345,9 +346,7 @@ static bool actkeys_channels_get_selected_extents(bAnimContext *ac, float *r_min
   /* loop through all channels, finding the first one that's selected */
   float ymax = ANIM_UI_get_first_channel_top(&ac->region->v2d);
   const float channel_step = ANIM_UI_get_channel_step();
-  for (ale = static_cast<bAnimListElem *>(anim_data.first); ale;
-       ale = ale->next, ymax -= channel_step)
-  {
+  for (ale = anim_data.first(); ale; ale = ale->next, ymax -= channel_step) {
     const bAnimChannelType *acf = ANIM_channel_get_typeinfo(ale);
 
     /* must be selected... */
@@ -811,10 +810,10 @@ static void insert_gpencil_key(bAnimContext *ac,
   Scene *scene = ac->scene;
   bGPdata *gpd = id_cast<bGPdata *>(ale->id);
   bGPDlayer *gpl = static_cast<bGPDlayer *>(ale->data);
-  BKE_gpencil_layer_frame_get(gpl, scene->r.cfra, add_frame_mode);
+  BKE_annotations_layer_frame_get(gpl, scene->r.cfra, add_frame_mode);
   /* Check if the gpd changes to tag only once. */
   if (gpd != *gpd_old) {
-    BKE_gpencil_tag(gpd);
+    BKE_annotations_tag(gpd);
     *gpd_old = gpd;
   }
 }
@@ -916,6 +915,33 @@ static void insert_fcurve_key(bAnimContext *ac,
   ale->update |= ANIM_UPDATE_DEFAULT;
 }
 
+static void insert_nla_curve_key(bAnimListElem &ale,
+                                 const AnimationEvalContext &anim_eval_context,
+                                 const eInsertKeyFlags flag)
+{
+  using namespace blender::animrig;
+  NlaStrip *strip = static_cast<NlaStrip *>(ale.owner);
+  FCurve *fcu = static_cast<FCurve *>(ale.data);
+  PointerRNA ptr = RNA_pointer_create_discrete(ale.id, RNA_NlaStrip, strip);
+  PropertyRNA *prop = RNA_struct_find_property(&ptr, fcu->rna_path().c_str());
+  if (!prop) {
+    return;
+  }
+
+  const KeyframeSettings key_settings = get_keyframe_settings((flag & INSERTKEY_NO_USERPREF) == 0);
+  const Vector<float> rna_values = get_property_values(&ptr, prop, /* visual_keyframing= */ false);
+  if (fcu->array_index >= rna_values.size()) {
+    return;
+  }
+
+  const SingleKeyingResult result = insert_vert_fcurve(
+      fcu, {anim_eval_context.eval_time, rna_values[fcu->array_index]}, key_settings, flag);
+
+  if (result == SingleKeyingResult::SUCCESS) {
+    ale.update |= ANIM_UPDATE_DEFAULT;
+  }
+}
+
 /* this function is responsible for inserting new keyframes */
 static void insert_action_keys(bAnimContext *ac, short mode)
 {
@@ -968,6 +994,10 @@ static void insert_action_keys(bAnimContext *ac, short mode)
 
       case ANIMTYPE_FCURVE:
         insert_fcurve_key(ac, &ale, anim_eval_context, flag);
+        break;
+
+      case ANIMTYPE_NLACURVE:
+        insert_nla_curve_key(ale, anim_eval_context, flag);
         break;
 
       default:
@@ -1064,7 +1094,7 @@ static bool duplicate_action_keys(bAnimContext *ac)
           static_cast<GreasePencilLayer *>(ale.data)->wrap());
     }
     else if (ale.type == ANIMTYPE_MASKLAYER) {
-      changed |= ED_masklayer_frames_duplicate(static_cast<MaskLayer *>(ale.data));
+      changed |= ED_masklayer_frames_duplicate(ac->bmain, static_cast<MaskLayer *>(ale.data));
     }
     else {
       BLI_assert(0);
@@ -1150,7 +1180,7 @@ static bool delete_action_keys(bAnimContext *ac)
       }
     }
     else if (ale.type == ANIMTYPE_MASKLAYER) {
-      changed = ED_masklayer_frames_delete(static_cast<MaskLayer *>(ale.data));
+      changed = ED_masklayer_frames_delete(ac->bmain, static_cast<MaskLayer *>(ale.data));
     }
     else {
       FCurve *fcu = static_cast<FCurve *>(ale.key_data);
@@ -1468,7 +1498,7 @@ static void setexpo_action_keys(bAnimContext *ac, short mode)
         /* remove all the modifiers fitting this description */
         FModifier *fcm, *fcn = nullptr;
 
-        for (fcm = static_cast<FModifier *>(fcu->modifiers.first); fcm; fcm = fcn) {
+        for (fcm = fcu->modifiers.first(); fcm; fcm = fcn) {
           fcn = fcm->next;
 
           if (fcm->type == FMODIFIER_TYPE_CYCLES) {
@@ -1769,6 +1799,7 @@ static void setkeytype_action_keys(bAnimContext *ac, eBezTriple_KeyframeType mod
         break;
 
       case ANIMTYPE_FCURVE:
+      case ANIMTYPE_NLACURVE:
         ANIM_fcurve_keyframes_loop(
             nullptr, static_cast<FCurve *>(ale.key_data), nullptr, set_cb, nullptr);
         ale.update |= ANIM_UPDATE_DEPS | ANIM_UPDATE_HANDLES;
@@ -1992,8 +2023,8 @@ static void snap_action_keys(bAnimContext *ac, short mode)
 
   ked.scene = ac->scene;
   if (mode == ACTKEYS_SNAP_NEAREST_MARKER) {
-    ked.time_marker_list.first = (ac->markers) ? ac->markers->first : nullptr;
-    ked.time_marker_list.last = (ac->markers) ? ac->markers->last : nullptr;
+    ked.time_marker_list.first_ = (ac->markers) ? ac->markers->first_ : nullptr;
+    ked.time_marker_list.last_ = (ac->markers) ? ac->markers->last() : nullptr;
   }
 
   /* snap keyframes */

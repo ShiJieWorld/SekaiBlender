@@ -9,6 +9,8 @@
 #include "BLI_resource_scope.hh"
 
 #include "BKE_compositor.hh"
+#include "BKE_compute_context_cache.hh"
+#include "BKE_compute_contexts.hh"
 #include "BKE_idprop.hh"
 #include "BKE_node_runtime.hh"
 
@@ -46,11 +48,12 @@ class CompositorEffectContext : public CompositorContext {
   ImBuf *output_;
   float factor_;
 
-  /* The hash of the active compute context. */
-  const ComputeContextHash active_compute_context_hash_;
+  /* The compute context of the active viewer if one exists. */
+  const ComputeContext *viewer_compute_context_;
 
  public:
   CompositorEffectContext(compositor::StaticCacheManager &cache_manager,
+                          bke::ComputeContextCache &compute_context_cache,
                           const RenderData &render_data,
                           bNodeTree *node_tree,
                           ImBuf *input_1,
@@ -58,20 +61,20 @@ class CompositorEffectContext : public CompositorContext {
                           ImBuf *output,
                           float factor,
                           const Strip &strip)
-      : CompositorContext(cache_manager, render_data, strip),
+      : CompositorContext(cache_manager, compute_context_cache, render_data, strip),
         node_group_(node_tree),
         input_1_(input_1),
         input_2_(input_2),
         output_(output),
         factor_(factor),
-        active_compute_context_hash_(bke::compositor::compute_active_compute_context_hash(
-            *render_data_.scene, *node_group_))
+        viewer_compute_context_(bke::compositor::compute_viewer_compute_context(
+            *render_data_.scene, *node_group_, compute_context_cache))
   {
   }
 
-  const ComputeContextHash &get_active_compute_context_hash() const override
+  const ComputeContext *viewer_compute_context() const override
   {
-    return active_compute_context_hash_;
+    return viewer_compute_context_;
   }
 
   compositor::Domain get_compositing_domain() const override
@@ -89,9 +92,9 @@ class CompositorEffectContext : public CompositorContext {
     using namespace compositor;
     const bNodeTree &node_group = *DEG_get_evaluated<bNodeTree>(render_data_.depsgraph,
                                                                 node_group_);
-    const bke::DataBlockComputeContext compute_context(nullptr, this->get_scene().id);
-    NodeGroupOperation node_group_operation(
-        *this, node_group, this->needed_outputs(), compute_context);
+    const bke::DataBlockComputeContext &compute_context =
+        this->compute_context_cache().for_data_block(nullptr, this->get_scene().id);
+    NodeGroupOperation node_group_operation(*this, node_group, compute_context);
     set_output_refcount(node_group, node_group_operation);
 
     node_group.ensure_topology_cache();
@@ -131,7 +134,7 @@ class CompositorEffectContext : public CompositorContext {
         create_result_from_input(*input_result, *this->input_2_);
         color_counter++;
       }
-      else if (valid_socket_type && inputs_ptr.data != nullptr) {
+      else if (valid_socket_type && inputs_ptr) {
         /* Remaining inputs read their value from the exposed RNA property. */
         set_input_result_from_rna(inputs_ptr, *input_socket, socket_type, *input_result);
       }
@@ -173,7 +176,9 @@ static SeqResult do_compositor_effect(const RenderData *context,
   }
   else {
     CompositorCache &com_cache = context->scene->ed->runtime->ensure_compositor_cache();
+    bke::ComputeContextCache compute_context_cache;
     CompositorEffectContext com_context(com_cache.get_cache_manager(),
+                                        compute_context_cache,
                                         *context,
                                         data->node_group,
                                         src1.image,
@@ -182,16 +187,16 @@ static SeqResult do_compositor_effect(const RenderData *context,
                                         fac,
                                         *strip);
 
+    GpuContextState gpu_state = GpuContextState::Unsupported;
     if (com_context.use_gpu()) {
-      com_context.set_gpu_supported(render_begin_gpu(*context));
+      gpu_state = render_begin_gpu(*context);
+      com_context.set_gpu_supported(gpu_state != GpuContextState::Unsupported);
     }
     com_cache.recreate_if_needed(
         com_context.use_gpu(), com_context.get_precision(), context->gpu_context);
     com_context.evaluate();
     com_context.cache_manager().reset();
-    if (com_context.use_gpu()) {
-      render_end_gpu(*context);
-    }
+    render_end_gpu(*context, gpu_state);
     out.translation += com_context.get_result_translation();
     out.is_opaque_before_transform = !out.image->can_contain_alpha();
   }
@@ -249,6 +254,13 @@ void compositor_effect_nodes_update_interface(Main &bmain, Scene &sequencer_scen
     comp->system_properties =
         bke::idprop::create_group("SequencerCompositorEffectProperties").release();
   }
+
+  /* In case the node group is missing, do not update the properties to avoid the values reverting
+   * to their default value if the node group later becomes available. */
+  if (!comp->node_group || ID_MISSING(comp->node_group)) {
+    return;
+  }
+
   PointerRNA properties_ptr = RNA_pointer_create_discrete(
       &sequencer_scene.id, RNA_SequencerCompositorEffectProperties, comp);
   RNA_ensure_and_sync_system_properties(bmain, properties_ptr, *comp->system_properties);
@@ -281,7 +293,7 @@ void compositor_effect_nodes_input_usages(const Scene &sequencer_scene,
   PointerRNA strip_ptr = RNA_pointer_create_discrete(
       &const_cast<Scene &>(sequencer_scene).id, RNA_CompositorStrip, &strip);
   PointerRNA properties_ptr = RNA_pointer_get(&strip_ptr, "properties");
-  if (properties_ptr.data == nullptr) {
+  if (!properties_ptr) {
     return;
   }
 

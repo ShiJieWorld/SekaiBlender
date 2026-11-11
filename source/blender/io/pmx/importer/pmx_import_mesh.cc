@@ -421,7 +421,7 @@ void create_mesh_object(PMXImportContext &ctx, PMXModel &model)
 
   if (!ctx.mesh_obj) {
     /* Fallback: find first mesh object. */
-    Object *ob = static_cast<Object *>(bmain->objects.first);
+    Object *ob = static_cast<Object *>(bmain->objects.first());
     while (ob) {
       if (ob->type == OB_MESH) {
         ctx.mesh_obj = ob;

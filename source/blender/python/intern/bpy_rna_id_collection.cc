@@ -53,7 +53,7 @@ static Main *pyrna_bmain_FromPyObject(PyObject *obj)
   }
   BPy_StructRNA *pyrna = reinterpret_cast<BPy_StructRNA *>(obj);
   PYRNA_STRUCT_CHECK_OBJ(pyrna);
-  if (!(pyrna->ptr && pyrna->ptr->type == RNA_BlendData && pyrna->ptr->data)) {
+  if (!(pyrna->ptr && pyrna->ptr->type == RNA_BlendData && *pyrna->ptr)) {
     PyErr_Format(PyExc_TypeError,
                  "Expected a StructRNA of type BlendData, not %.200s",
                  Py_TYPE(pyrna)->tp_name);
@@ -849,7 +849,7 @@ PyDoc_STRVAR(
     ":class:`bpy.types.BlendDataPathMeta`], str|None]\n"
     "   :param subset: When given, only these data-blocks and their used file paths "
     "will be visited.\n"
-    "   :type subset: set[str] | None\n"
+    "   :type subset: set[:class:`bpy.types.ID`] | None\n"
     "   :param visit_types: When given, only visit data-blocks of these types. Ignored if "
     "``subset`` is also given.\n"
     "   :type visit_types: set[str] | None\n"

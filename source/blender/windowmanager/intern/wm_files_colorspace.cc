@@ -70,7 +70,7 @@ static bool wm_set_working_space_check_safe(bContext *C, wmOperator *op)
   const Main *bmain = CTX_data_main(C);
   const Scene *scene = CTX_data_scene(C);
 
-  if (WM_jobs_test(wm, scene, WM_JOB_TYPE_ANY)) {
+  if (WM_jobs_has_running(wm, scene, WM_JOB_TYPE_ANY, WM_JOB_BACKGROUND)) {
     BKE_report(
         op->reports, RPT_WARNING, RPT_("Can't change working space while jobs are running"));
     return false;
@@ -177,9 +177,9 @@ static wmOperatorStatus wm_set_working_color_space_invoke(bContext *C,
       std::nullopt,
       IFACE_("Apply"),
       false,
-      IFACE_("To match renders with the previous working space as closely as possible,\n"
+      IFACE_("To match renders with the previous working space as closely as possible, "
              "colors in all materials, lights and geometry must be converted.\n\n"
-             "Some nodes graphs cannot be converted accurately and may need manual fix-ups."));
+             "Some node graphs cannot be converted accurately and may need manual fix-ups."));
 }
 
 void WM_OT_set_working_color_space(wmOperatorType *ot)
@@ -205,6 +205,7 @@ void WM_OT_set_working_color_space(wmOperatorType *ot)
                                    "Working Space",
                                    "Color space to set");
   RNA_def_enum_funcs(prop, working_space_itemf);
+  RNA_def_property_translation_context(prop, BLT_I18NCONTEXT_COLOR_MANAGEMENT);
 
   ot->prop = prop;
 }

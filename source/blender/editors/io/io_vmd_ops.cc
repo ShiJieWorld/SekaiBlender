@@ -104,7 +104,7 @@ static Object *vmd_find_morph_controller(Main *bmain, Object *target)
     if (anchor == nullptr) {
       continue;
     }
-    for (Object *ob = static_cast<Object *>(bmain->objects.first); ob != nullptr;
+    for (Object *ob = static_cast<Object *>(bmain->objects.first()); ob != nullptr;
          ob = static_cast<Object *>(ob->id.next))
     {
       if (ob->parent != anchor || ob->type != OB_MESH) {
@@ -118,7 +118,7 @@ static Object *vmd_find_morph_controller(Main *bmain, Object *target)
   }
 
   /* Fallback: any PMXMorphController mesh in the scene (single-model case). */
-  for (Object *ob = static_cast<Object *>(bmain->objects.first); ob != nullptr;
+  for (Object *ob = static_cast<Object *>(bmain->objects.first()); ob != nullptr;
        ob = static_cast<Object *>(ob->id.next))
   {
     if (ob->type == OB_MESH &&
@@ -159,7 +159,7 @@ static const EnumPropertyItem *vmd_target_armature_itemf(bContext *C,
 
   Main *bmain = CTX_data_main(C);
   int ordinal = 1;
-  for (Object *ob = static_cast<Object *>(bmain->objects.first); ob != nullptr;
+  for (Object *ob = static_cast<Object *>(bmain->objects.first()); ob != nullptr;
        ob = static_cast<Object *>(ob->id.next))
   {
     if (ob->type != OB_ARMATURE) {
@@ -388,9 +388,9 @@ static int vmd_suspend_mmd_approx_constraints(Main *bmain, Object *ob, int *r_ke
 
   int suspended = 0;
   int kept = 0;
-  for (bPoseChannel *pchan = static_cast<bPoseChannel *>(ob->pose->chanbase.first); pchan != nullptr;
+  for (bPoseChannel *pchan = static_cast<bPoseChannel *>(ob->pose->chanbase.first()); pchan != nullptr;
        pchan = pchan->next) {
-    for (bConstraint *con = static_cast<bConstraint *>(pchan->constraints.first); con != nullptr;
+    for (bConstraint *con = static_cast<bConstraint *>(pchan->constraints.first()); con != nullptr;
          con = con->next) {
       /* MMD_Local_Axis_Approx: self-referential TRANSFORM (ADD mode) that
        * ADDs a bone's own local-space rotation to itself. It is needed for
@@ -496,12 +496,12 @@ static bool vmd_is_rigify_bridge_armature(const Object &object)
   if (object.pose == nullptr) {
     return false;
   }
-  for (const bPoseChannel *pchan = static_cast<const bPoseChannel *>(object.pose->chanbase.first);
+  for (const bPoseChannel *pchan = static_cast<const bPoseChannel *>(object.pose->chanbase.first());
        pchan != nullptr;
        pchan = pchan->next)
   {
     for (const bConstraint *constraint = static_cast<const bConstraint *>(
-             pchan->constraints.first);
+             pchan->constraints.first());
          constraint != nullptr;
          constraint = constraint->next)
     {
@@ -518,7 +518,7 @@ static Object *vmd_find_rigify_source(Main *bmain, const Object *active)
   if (active == nullptr || strncmp(active->id.name + 2, "RIG-", 4) != 0) {
     return nullptr;
   }
-  for (Object *object = static_cast<Object *>(bmain->objects.first); object != nullptr;
+  for (Object *object = static_cast<Object *>(bmain->objects.first()); object != nullptr;
        object = static_cast<Object *>(object->id.next))
   {
     if (object != active && vmd_is_rigify_bridge_armature(*object)) {
@@ -549,7 +549,7 @@ static Object *vmd_resolve_target(bContext *C, wmOperator *op, Main *bmain)
       }
       return active;
     }
-    for (Object *ob = static_cast<Object *>(bmain->objects.first); ob != nullptr;
+    for (Object *ob = static_cast<Object *>(bmain->objects.first()); ob != nullptr;
          ob = static_cast<Object *>(ob->id.next))
     {
       if (ob->type == OB_ARMATURE) {
@@ -565,7 +565,7 @@ static Object *vmd_resolve_target(bContext *C, wmOperator *op, Main *bmain)
 
   /* Resolve by ordinal among armatures (stable across dropdown rebuilds). */
   int ordinal = 1;
-  for (Object *ob = static_cast<Object *>(bmain->objects.first); ob != nullptr;
+  for (Object *ob = static_cast<Object *>(bmain->objects.first()); ob != nullptr;
        ob = static_cast<Object *>(ob->id.next))
   {
     if (ob->type != OB_ARMATURE) {
@@ -941,7 +941,7 @@ wmOperatorStatus wm_vmd_camera_import_exec(bContext *C, wmOperator *op)
   }
 
   Object *imported_camera = nullptr;
-  for (Object *ob = static_cast<Object *>(bmain->objects.first); ob != nullptr;
+  for (Object *ob = static_cast<Object *>(bmain->objects.first()); ob != nullptr;
        ob = static_cast<Object *>(ob->id.next))
   {
     if (result.camera_action.target_camera_name == std::string(ob->id.name + 2)) {
@@ -1106,7 +1106,7 @@ static Object *vmd_resolve_export_camera(bContext *C, Main *bmain)
       return active;
     }
     if (active->type == OB_EMPTY) {
-      for (Object *ob = static_cast<Object *>(bmain->objects.first); ob != nullptr;
+      for (Object *ob = static_cast<Object *>(bmain->objects.first()); ob != nullptr;
            ob = static_cast<Object *>(ob->id.next))
       {
         if (ob->parent == active && ob->type == OB_CAMERA) {

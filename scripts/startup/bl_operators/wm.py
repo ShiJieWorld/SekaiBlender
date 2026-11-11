@@ -2397,6 +2397,78 @@ class WM_OT_tool_set_by_id(Operator):
             return {'CANCELLED'}
 
 
+class WM_OT_tool_set_by_id_hold(Operator):
+    """Set the tool by name while the key is held, restoring the previous tool on release (for key-maps)"""
+    bl_idname = "wm.tool_set_by_id_hold"
+    bl_label = "Set Tool by Name (Hold)"
+
+    # Only kept for identity, never inspect it's contents.
+    _active_operator = None
+
+    name: StringProperty(
+        name="Identifier",
+        description="Identifier of the tool",
+    )
+
+    space_type: rna_space_type_prop
+
+    def _active_tool_restore(self, context):
+        from bl_ui.space_toolsystem_common import activate_by_id
+        if self._tool_prev_idname:
+            activate_by_id(context, self._space_type, self._tool_prev_idname)
+        # Harmless but better not keep a dangling reference.
+        WM_OT_tool_set_by_id_hold._active_operator = None
+
+    def invoke(self, context, event):
+        from bl_ui.space_toolsystem_common import (
+            ToolSelectPanelHelper,
+            activate_by_id,
+        )
+
+        if (space_type := WM_OT_tool_set_by_id.space_type_from_operator(self, context)) is None:
+            return {'CANCELLED'}
+
+        if (
+                (op_other := context.window.modal_operators.get(self.bl_idname)) and
+                (op_other._space_type == space_type)
+        ):
+            tool_prev_idname = op_other._tool_prev_idname
+        else:
+            # Should always be set, nevertheless, if in some rare case it's not,
+            # that shouldn't prevent the tool from being activated.
+            tool_prev = ToolSelectPanelHelper.tool_active_from_context(context, space_type)
+            tool_prev_idname = "" if tool_prev is None else tool_prev.idname
+
+        if not activate_by_id(context, space_type, self.name):
+            self.report({'WARNING'}, rpt_("Tool {!r} not found for space {!r}").format(self.name, space_type))
+            return {'CANCELLED'}
+
+        self._space_type = space_type
+        self._tool_prev_idname = tool_prev_idname
+        self._event_type = event.type
+
+        WM_OT_tool_set_by_id_hold._active_operator = self
+
+        context.window_manager.modal_handler_add(self)
+        return {'RUNNING_MODAL'}
+
+    def cancel(self, context):
+        if WM_OT_tool_set_by_id_hold._active_operator is not self:
+            return
+        self._active_tool_restore(context)
+
+    def modal(self, context, event):
+        # Another operator took over.
+        if WM_OT_tool_set_by_id_hold._active_operator is not self:
+            return {'FINISHED', 'PASS_THROUGH'}
+
+        if event.type == self._event_type and event.value == 'RELEASE':
+            self._active_tool_restore(context)
+            return {'FINISHED'}
+
+        return {'PASS_THROUGH'}
+
+
 class WM_OT_tool_set_by_index(Operator):
     """Set the tool by index (for key-maps)"""
     bl_idname = "wm.tool_set_by_index"
@@ -2820,7 +2892,8 @@ class WM_OT_batch_rename(Operator):
             ('ACTION_CLIP', "Action Clips", "", 'ACTION', 17),
             None,
             ('SCENE', "Scenes", "", 'SCENE_DATA', 18),
-            ('BRUSH', "Brushes", "", 'BRUSH_DATA', 19),
+            ('MARKER', "Markers", "", 'TIME', 19),
+            ('BRUSH', "Brushes", "", 'BRUSH_DATA', 20),
         ),
         translation_context=i18n_contexts.id_id,
         description="Type of data to rename",
@@ -2874,6 +2947,23 @@ class WM_OT_batch_rename(Operator):
             if action.is_editable
         ))
 
+    @staticmethod
+    def _markers_from_context(context, space_type, only_selected):
+        from contextlib import nullcontext
+        if space_type == 'SEQUENCE_EDITOR':
+            context_manager = context.temp_override(scene=context.sequencer_scene)
+        else:
+            context_manager = nullcontext()
+
+        with context_manager:
+            return context.selected_markers if only_selected else context.markers
+
+    @staticmethod
+    def _markers_label(markers):
+        if markers and markers[0].id_data.id_type == 'ACTION':
+            return iface_("Pose Marker(s)")
+        return iface_("Timeline Marker(s)")
+
     @classmethod
     def _data_from_context(cls, context, data_type, only_selected, *, check_context=False):
         def _is_editable(data):
@@ -2893,7 +2983,7 @@ class WM_OT_batch_rename(Operator):
                 data = (
                     context.selected_strips
                     if only_selected else
-                    scene.sequence_editor.strips_all,
+                    context.sequencer_scene.sequence_editor.strips_all,
                     "name",
                     iface_("Strip(s)"),
                 )
@@ -3044,6 +3134,13 @@ class WM_OT_batch_rename(Operator):
                     ),
                     "name",
                     iface_("Scene(s)"),
+                )
+            elif data_type == 'MARKER':
+                markers = cls._markers_from_context(context, space_type, only_selected)
+                data = (
+                    markers,
+                    "name",
+                    cls._markers_label(markers)
                 )
             elif data_type == 'BRUSH':
                 data = (
@@ -3442,72 +3539,251 @@ class WM_MT_splash_quick_setup(Menu):
         layout.separator(factor=2.0)
 
 
+class WM_OT_splash_sponsor_sort(Operator):
+    """Change how the splash sponsor list is ordered"""
+    bl_idname = "wm.splash_sponsor_sort"
+    bl_label = "Sponsor Sort"
+    bl_options = {'INTERNAL'}
+
+    value: StringProperty(
+        name="Sort",
+        default='TIME',
+    )
+
+    def execute(self, context):
+        context.window_manager.splash_sponsor_sort = self.value
+        return {'FINISHED'}
+
+
+class WM_OT_splash_sponsor_order(Operator):
+    """Toggle ascending / descending order of the splash sponsor list"""
+    bl_idname = "wm.splash_sponsor_order"
+    bl_label = "Sponsor Order"
+    bl_options = {'INTERNAL'}
+
+    descending: BoolProperty(
+        name="Descending",
+        default=True,
+    )
+
+    def execute(self, context):
+        context.window_manager.splash_sponsor_desc = bool(self.descending)
+        return {'FINISHED'}
+
+
+class WM_OT_splash_sponsor_page(Operator):
+    """Turn the splash sponsor list to another page"""
+    bl_idname = "wm.splash_sponsor_page"
+    bl_label = "Sponsor Page"
+    bl_options = {'INTERNAL'}
+
+    delta: IntProperty(
+        name="Delta",
+        description="Page offset, typically -1 or +1",
+        default=1,
+    )
+
+    def execute(self, context):
+        from sekaiblender_sponsors import PAGE_SIZE, filtered_sponsors, page_count
+        wm = context.window_manager
+        query = getattr(wm, "splash_sponsor_query", "")
+        descending = bool(getattr(wm, "splash_sponsor_desc", True))
+        pages = page_count(
+            len(filtered_sponsors(wm.splash_sponsor_sort, query, descending)),
+            PAGE_SIZE,
+        )
+        wm.splash_sponsor_page = (int(wm.splash_sponsor_page) + int(self.delta)) % pages
+        return {'FINISHED'}
+
+
+class WM_MT_splash_project(Menu):
+    bl_label = "Project"
+
+    def draw(self, context):
+        layout = self.layout
+        layout.operator_context = 'INVOKE_DEFAULT'
+
+        have_recent = layout.template_recent_projects(rows=10)
+        if have_recent:
+            layout.separator()
+
+        layout.operator("project.new", text="New Project...", icon='ADD')
+        layout.operator("project.open", text="Open...", icon='FILE_FOLDER')
+        if bpy.data.project is not None:
+            layout.operator("project.close", text="Close")
+
+
 class WM_MT_splash(Menu):
     bl_label = "Splash"
 
     def draw(self, context):
         layout = self.layout
         layout.operator_context = 'EXEC_DEFAULT'
-        layout.emboss = 'PULLDOWN_MENU'
 
-        split = layout.split()
+        if bpy.app.build_options.international:
+            lang = layout.column()
+            lang.use_property_split = True
+            lang.use_property_decorate = False
+            lang.prop(context.preferences.view, "language", text="Language")
 
-        # Templates
-        col1 = split.column()
-        col1.label(text="New File")
+        layout.separator(type='LINE')
 
-        bpy.types.TOPBAR_MT_file_new.draw_ex(col1, context, use_splash=True)
+        from sekaiblender_sponsors import BILIBILI_URL, GITHUB_URL
+        contact_title = layout.row()
+        contact_title.label(text="联系开发者", icon='USER')
+        contact = layout.row(align=True)
+        contact.scale_y = 0.95
+        contact.operator("wm.url_open", text="GitHub").url = GITHUB_URL
+        contact.operator("wm.url_open", text="B站").url = BILIBILI_URL
 
-        # Recent
-        col2 = split.column()
-        col2_title = col2.row()
+        layout.separator(type='LINE')
 
-        found_recent = col2.template_recent_files(rows=5)
+        header = layout.row()
+        header.label(text="最近打开的工程")
+
+        wm = context.window_manager
+        recent_rows = int(getattr(wm, "splash_recent_rows", 6))
+        recent_scale = max(1.0, float(getattr(wm, "splash_recent_scale", 1.0)))
+        files = layout.column(align=True)
+        files.scale_y = recent_scale
+        found_recent = files.template_recent_files(rows=recent_rows)
 
         if found_recent:
-            col2_title.label(text="Recent Files")
-
-            col_more = col2.column()
-            col_more.operator_context = 'INVOKE_DEFAULT'
-            more_props = col_more.operator("wm.search_single_menu", text="More...", icon='VIEWZOOM')
+            more = layout.row()
+            more.emboss = 'NONE'
+            more.operator_context = 'INVOKE_DEFAULT'
+            more_props = more.operator("wm.search_single_menu", text="全部工程", icon='VIEWZOOM')
             more_props.menu_idname = "TOPBAR_MT_file_open_recent"
         else:
-            # Links if no recent files.
-            col2_title.label(text="Getting Started")
-
-            col2.operator("wm.url_open_preset", text="Manual", icon='URL').type = 'MANUAL'
-            col2.operator("wm.url_open", text="Support", icon='URL').url = "https://www.blender.org/support/"
-            col2.operator("wm.url_open", text="User Communities", icon='URL').url = "https://www.blender.org/community/"
-            col2.operator("wm.url_open", text="Get Involved", icon='URL').url = "https://www.blender.org/get-involved/"
-            col2.operator("wm.url_open_preset", text="Blender Website", icon='URL').type = 'BLENDER'
-
-        col_sep = layout.column()
-        col_sep.separator()
-        col_sep.separator(type='LINE')
-        col_sep.separator()
-
-        split = layout.split()
-
-        col1 = split.column()
-        sub = col1.row()
-        sub.operator_context = 'INVOKE_DEFAULT'
-        sub.operator("wm.open_mainfile", text="Open...", icon='FILE_FOLDER')
-        col1.operator("wm.recover_last_session", icon='RECOVER_LAST')
-
-        col2 = split.column()
-
-        col2.operator("wm.url_open_preset", text="What's New", icon='URL').type = 'RELEASE_NOTES'
-        col2.operator("wm.url_open_preset", text="Donate to Blender", icon='FUND').type = 'FUND'
+            empty = layout.column()
+            empty.label(text="还没有最近工程")
+            empty.label(text="打开一份 .blend，下次就会出现在这里")
 
         layout.separator()
-        layout.menu("USERPREF_MT_interface_theme_presets", text="Interface Theme")
+        layout.separator(type='LINE')
 
-        layout.separator()
+        actions = layout.row(align=True)
+        actions.emboss = 'NONE'
+        actions.scale_y = 1.05
+        open_row = actions.row(align=True)
+        open_row.operator_context = 'INVOKE_DEFAULT'
+        open_row.operator("wm.open_mainfile", text="打开...", icon='FILE_FOLDER')
+        actions.operator("wm.recover_last_session", text="恢复上次会话", icon='RECOVER_LAST')
+        new_row = actions.row(align=True)
+        new_props = new_row.operator("wm.read_homefile", text="新建", icon='FILE_NEW')
+        new_props.app_template = ""
+
+        layout.separator(type='LINE')
 
         if (not bpy.app.online_access) and bpy.app.online_access_override:
-            self.layout.label(text="Running in Offline Mode", icon='INTERNET_OFFLINE')
+            layout.label(text="Running in Offline Mode", icon='INTERNET_OFFLINE')
 
-        layout.separator()
+
+class WM_MT_splash_sponsors(Menu):
+    bl_label = "Sponsors"
+
+    def draw(self, context):
+        from sekaiblender_sponsors import (
+            AFDIAN_URL,
+            PAGE_SIZE,
+            ROSTER_UPDATED,
+            XIANYU_URL,
+            page_slice,
+        )
+
+        layout = self.layout
+        layout.operator_context = 'EXEC_DEFAULT'
+
+        wm = context.window_manager
+        query = getattr(wm, "splash_sponsor_query", "")
+        descending = bool(getattr(wm, "splash_sponsor_desc", True))
+        page_items, page, pages, total = page_slice(
+            wm.splash_sponsor_sort,
+            wm.splash_sponsor_page,
+            PAGE_SIZE,
+            query,
+            descending,
+        )
+
+        title = layout.row()
+        title.label(text="赞助者 · PATRONS")
+
+        heading = layout.box()
+        heading.scale_y = 1.35
+        heading.label(text="支持 SekaiBlender", icon='FUND')
+        cta = layout.row(align=True)
+        cta.scale_y = 0.95
+        cta.operator("wm.url_open", text="闲鱼").url = XIANYU_URL
+        cta.operator("wm.url_open", text="爱发电").url = AFDIAN_URL
+
+        layout.separator(type='LINE')
+
+        sorts = layout.row(align=True)
+        for value, label in (("TIME", "时间"), ("AMOUNT", "金额")):
+            props = sorts.operator(
+                "wm.splash_sponsor_sort",
+                text=label,
+                depress=(wm.splash_sponsor_sort == value),
+            )
+            props.value = value
+        order = sorts.row(align=True)
+        up = order.operator(
+            "wm.splash_sponsor_order",
+            text="",
+            icon='SORT_ASC',
+            depress=(not descending),
+        )
+        up.descending = False
+        down = order.operator(
+            "wm.splash_sponsor_order",
+            text="",
+            icon='SORT_DESC',
+            depress=descending,
+        )
+        down.descending = True
+
+        search = layout.row(align=True)
+        search.prop(wm, "splash_sponsor_query", text="", icon='VIEWZOOM', placeholder="搜索名字")
+
+        layout.separator(factor=0.4)
+        layout.label(text="更新于 {:s}".format(ROSTER_UPDATED))
+        layout.separator(type='LINE')
+
+        # Fixed PAGE_SIZE cells so the pager never rides the last filled row.
+        grid = layout.grid_flow(
+            row_major=True,
+            columns=2,
+            even_columns=True,
+            even_rows=True,
+            align=True,
+        )
+        cell_scale = max(0.95, float(getattr(wm, "splash_sponsor_cell_scale", 1.15)))
+        for item in page_items:
+            cell = grid.box()
+            cell.scale_y = cell_scale
+            if item is None:
+                cell.label(text=" ")
+            else:
+                # Name and meta on separate lines so YYYY-MM-DD / ¥amount
+                # are not ellipsized in the narrow two-column cells.
+                cell.label(text=item["name"])
+                meta = cell.row()
+                meta.scale_y = 0.8
+                if wm.splash_sponsor_sort == 'AMOUNT':
+                    meta.label(text="¥{:d}".format(int(item.get("amount", 0))))
+                else:
+                    meta.label(text=item.get("joined", ""))
+
+        layout.separator(type='LINE')
+        nav = layout.row(align=True)
+        prev = nav.operator("wm.splash_sponsor_page", text="", icon='TRIA_LEFT')
+        prev.delta = -1
+        nav.label(
+            text=iface_("{:d} / {:d} · {:d}").format(page + 1, pages, total),
+            translate=False,
+        )
+        nxt = nav.operator("wm.splash_sponsor_page", text="", icon='TRIA_RIGHT')
+        nxt.delta = 1
 
 
 class WM_MT_splash_about(Menu):
@@ -3689,25 +3965,77 @@ class WM_OT_drop_blend_file(Operator):
         subtype='FILE_PATH',
         options={'SKIP_SAVE'},
     )
+    use_scripts: BoolProperty(
+        name="Trusted Source",
+        options={'SKIP_SAVE'},
+        description="Allow .blend file to execute scripts automatically, default available from system preferences"
+    )
+
+    @classmethod
+    def _is_autoexec(cls, filepath, *, skip_overrides):
+        """
+        Return true when the directory of ``filepath`` isn't excluded,
+        ``skip_overrides`` ignores the preference & command line override
+        which otherwise give the default for "Trusted Source".
+        """
+        return bpy.path.is_autoexec(
+            filepath,
+            skip_overrides=skip_overrides,
+            canonicalize=True,
+            strip_filename=True,
+        )
+
+    def draw(self, context):
+        layout = self.layout
+        filepath = self.filepath
+
+        layout.label(text=bpy.path.basename(filepath), icon='QUESTION')
+
+        col = layout.column()
+        col.operator_context = 'INVOKE_DEFAULT'
+        # Return activates "Open", the primary action of this popup.
+        col.active_default = True
+        props = col.operator("wm.open_mainfile", text="Open", icon='FILE_FOLDER')
+        props.filepath = filepath
+        props.display_file_selector = False
+        props.use_scripts = self.use_scripts
+
+        # Excluded paths can't be trusted, unless the command line overrides the preference.
+        is_untrusted = (
+            context.preferences.filepaths.use_scripts_auto_execute and
+            bpy.app.autoexec_override is None and
+            not self._is_autoexec(filepath, skip_overrides=True)
+        )
+
+        col = layout.column()
+        if not is_untrusted:
+            col.prop(self, "use_scripts")
+        else:
+            col.enabled = False
+            col.prop(self, "use_scripts", text="Trusted Source [Untrusted Path]")
+
+        layout.separator(type='LINE')
+
+        col = layout.column()
+        col.operator_context = 'INVOKE_DEFAULT'
+        # Use the confirm template so pressing these closes the popup,
+        # the popup is kept open otherwise (see `BLOCK_KEEP_OPEN`).
+        col.template_popup_confirm(
+            "wm.link", text="Link...", icon='LINK_BLEND', cancel_text="",
+        ).filepath = filepath
+        col.template_popup_confirm(
+            "wm.append", text="Append...", icon='APPEND_BLEND', cancel_text="",
+        ).filepath = filepath
+
+    def execute(self, context):
+        # Needed so the popup draws this operators UI.
+        return {'CANCELLED'}
 
     def invoke(self, context, _event):
-        context.window_manager.popup_menu(self.draw_menu, title=bpy.path.basename(self.filepath), icon='QUESTION')
-        return {'FINISHED'}
-
-    def draw_menu(self, menu, _context):
-        layout = menu.layout
-
-        col = layout.column()
-        col.operator_context = 'INVOKE_DEFAULT'
-        props = col.operator("wm.open_mainfile", text="Open", icon='FILE_FOLDER')
-        props.filepath = self.filepath
-        props.display_file_selector = False
-
-        layout.separator()
-        col = layout.column()
-        col.operator_context = 'INVOKE_DEFAULT'
-        col.operator("wm.link", text="Link...", icon='LINK_BLEND').filepath = self.filepath
-        col.operator("wm.append", text="Append...", icon='APPEND_BLEND').filepath = self.filepath
+        # Match the file selector.
+        self.use_scripts = self._is_autoexec(self.filepath, skip_overrides=False)
+        # The popup shows this operators own UI, keeping it alive while it's open.
+        return context.window_manager.invoke_popup(self, width=200, auto_keymap=True)
 
 
 classes = (
@@ -3746,6 +4074,7 @@ classes = (
     WM_OT_url_open,
     WM_OT_url_open_preset,
     WM_OT_tool_set_by_id,
+    WM_OT_tool_set_by_id_hold,
     WM_OT_tool_set_by_index,
     WM_OT_tool_set_by_brush_type,
     WM_OT_toolbar,
@@ -3753,8 +4082,13 @@ classes = (
     WM_OT_toolbar_prompt,
     BatchRenameAction,
     WM_OT_batch_rename,
+    WM_OT_splash_sponsor_sort,
+    WM_OT_splash_sponsor_order,
+    WM_OT_splash_sponsor_page,
     WM_MT_splash_quick_setup,
+    WM_MT_splash_project,
     WM_MT_splash,
+    WM_MT_splash_sponsors,
     WM_MT_splash_about,
     WM_MT_region_toggle_pie,
 )

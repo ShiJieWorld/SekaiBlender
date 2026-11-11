@@ -221,6 +221,8 @@ class Meshes : Overlay {
       pass.state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_DEPTH_LESS_EQUAL | DRW_STATE_BLEND_ALPHA,
                      state.clipping_plane_count);
       pass.shader_set(res.shaders->mesh_analysis.get());
+      pass.bind_ubo(OVERLAY_GLOBALS_SLOT, &res.globals_buf);
+      pass.bind_ubo(DRW_CLIPPING_UBO_SLOT, &res.clip_planes_buf);
       pass.bind_texture("weight_tx", res.weight_ramp_tx);
     }
 
@@ -473,8 +475,14 @@ class Meshes : Overlay {
   static bool mesh_has_skin_roots(const Object *ob)
   {
     Mesh &mesh = DRW_object_get_data_for_drawing<Mesh>(*ob);
-    if (BMEditMesh *em = mesh.runtime->edit_mesh.get()) {
-      return CustomData_get_offset(&em->bm->vdata, CD_MVERT_SKIN) != -1;
+    if (const BMesh *bm = BKE_editmesh_bmesh_get(&mesh)) {
+      if (CustomData_get_offset_named(&bm->vdata, CD_PROP_FLOAT2, "skin_modifier_radius") == -1) {
+        return false;
+      }
+      if (CustomData_get_offset_named(&bm->vdata, CD_PROP_BOOL, "skin_modifier_root") == -1) {
+        return false;
+      }
+      return true;
     }
     return false;
   }
@@ -817,6 +825,7 @@ class MeshUVs : Overlay {
 
     const Object *ob_orig = DEG_get_original(ob_ref.object);
     const Mesh &mesh_orig = ob_orig->type == OB_MESH ? *id_cast<Mesh *>(ob_orig->data) : mesh;
+    const BMesh *bm = BKE_editmesh_bmesh_get(&mesh_orig);
 
     const SpaceImage *space_image = reinterpret_cast<const SpaceImage *>(state.space_data);
     const bool is_edit_object = DRW_object_is_in_edit_mode(&ob);
@@ -832,10 +841,9 @@ class MeshUVs : Overlay {
         active_uv_map);
     const bool has_active_object_uvmap = bke::mesh::is_uv_map(meta_data);
 
-    const bool has_active_edit_uvmap = is_edit_object && CustomData_has_layer_named(
-                                                             &mesh.runtime->edit_mesh->bm->ldata,
-                                                             CD_PROP_FLOAT2,
-                                                             active_uv_map);
+    const bool has_active_edit_uvmap = is_edit_object && CustomData_has_layer_named(&bm->ldata,
+                                                                                    CD_PROP_FLOAT2,
+                                                                                    active_uv_map);
 
     ResourceHandleRange res_handle = manager.unique_handle(ob_ref);
 

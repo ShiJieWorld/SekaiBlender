@@ -130,7 +130,7 @@ bool build_vmd_morph_action(Main *bmain,
                 reports,
                 "Some VMD Morph tracks are missing from the target Shape Keys and were skipped");
   }
-  if (target_key.block.first == nullptr) {
+  if (target_key.block.first() == nullptr) {
     add_error(r_result, reports, "VMD Morph Action target Key has no Shape Keys");
     return false;
   }

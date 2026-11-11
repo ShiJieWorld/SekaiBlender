@@ -18,6 +18,8 @@
 #include "BKE_anim_data.hh"
 #include "BKE_animsys.hh"
 #include "BKE_compositor.hh"
+#include "BKE_compute_context_cache.hh"
+#include "BKE_compute_contexts.hh"
 #include "BKE_context.hh"
 #include "BKE_idprop.hh"
 #include "BKE_node.hh"
@@ -58,6 +60,13 @@ void compositor_modifier_nodes_update_interface(Main &bmain,
     cmd.modifier.system_properties =
         bke::idprop::create_group("SequencerCompositorModifierProperties").release();
   }
+
+  /* In case the node group is missing, do not update the properties to avoid the values reverting
+   * to their default value if the node group later becomes available. */
+  if (!cmd.node_group || ID_MISSING(cmd.node_group)) {
+    return;
+  }
+
   PointerRNA properties_ptr = RNA_pointer_create_discrete(
       &sequencer_scene.id, RNA_SequencerCompositorModifierProperties, &cmd);
   RNA_ensure_and_sync_system_properties(bmain, properties_ptr, *cmd.modifier.system_properties);
@@ -75,8 +84,8 @@ class CompositorModifierContext : public CompositorContext {
   ImBuf *mask_buffer_ = nullptr;
   int timeline_frame_;
 
-  /* The hash of the active compute context. */
-  const ComputeContextHash active_compute_context_hash_;
+  /* The compute context of the active viewer if one exists. */
+  const ComputeContext *viewer_compute_context_;
 
   bool owns_mask_ = false;
   PointerRNA properties_ptr_;
@@ -84,15 +93,17 @@ class CompositorModifierContext : public CompositorContext {
  public:
   CompositorModifierContext(const ModifierApplyContext &mod_context,
                             compositor::StaticCacheManager &cache_manager,
+                            bke::ComputeContextCache &compute_context_cache,
                             SequencerCompositorModifierData *modifier_data)
-      : CompositorContext(cache_manager, mod_context.render_data, mod_context.strip),
+      : CompositorContext(
+            cache_manager, compute_context_cache, mod_context.render_data, mod_context.strip),
         mod_context_(mod_context),
         modifier_data_(modifier_data),
         image_buffer_(mod_context.result.image),
         mask_(*this, compositor::ResultType::Color, compositor::ResultPrecision::Full),
         timeline_frame_(mod_context.timeline_frame),
-        active_compute_context_hash_(bke::compositor::compute_active_compute_context_hash(
-            *render_data_.scene, *modifier_data_->node_group))
+        viewer_compute_context_(bke::compositor::compute_viewer_compute_context(
+            *render_data_.scene, *modifier_data_->node_group, compute_context_cache))
   {
     PointerRNA ptr = RNA_pointer_create_discrete(
         &mod_context.render_data.scene->id, RNA_SequencerCompositorModifierData, modifier_data);
@@ -110,9 +121,9 @@ class CompositorModifierContext : public CompositorContext {
     }
   }
 
-  const ComputeContextHash &get_active_compute_context_hash() const override
+  const ComputeContext *viewer_compute_context() const override
   {
-    return active_compute_context_hash_;
+    return viewer_compute_context_;
   }
 
   compositor::Domain get_compositing_domain() const override
@@ -135,14 +146,14 @@ class CompositorModifierContext : public CompositorContext {
 
     const bNodeTree &node_group = *DEG_get_evaluated<bNodeTree>(render_data_.depsgraph,
                                                                 modifier_data_->node_group);
-    const bke::DataBlockComputeContext compute_context(nullptr, this->get_scene().id);
-    NodeGroupOperation node_group_operation(
-        *this, node_group, this->needed_outputs(), compute_context);
+    const bke::DataBlockComputeContext &compute_context =
+        this->compute_context_cache().for_data_block(nullptr, this->get_scene().id);
+    NodeGroupOperation node_group_operation(*this, node_group, compute_context);
     set_output_refcount(node_group, node_group_operation);
 
     node_group.ensure_topology_cache();
     PointerRNA inputs_ptr = RNA_pointer_get(&properties_ptr_, "inputs");
-    BLI_assert(inputs_ptr.data != nullptr);
+    BLI_assert(inputs_ptr);
 
     /* Map the inputs to the operation. */
     Vector<std::unique_ptr<Result>> inputs;
@@ -275,10 +286,14 @@ static void compositor_modifier_apply(ModifierApplyContext &context,
   }
 
   CompositorCache &com_cache = context.render_data.scene->ed->runtime->ensure_compositor_cache();
-  CompositorModifierContext com_mod_context(context, com_cache.get_cache_manager(), modifier_data);
+  bke::ComputeContextCache compute_context_cache;
+  CompositorModifierContext com_mod_context(
+      context, com_cache.get_cache_manager(), compute_context_cache, modifier_data);
 
+  GpuContextState gpu_state = GpuContextState::Unsupported;
   if (com_mod_context.use_gpu()) {
-    com_mod_context.set_gpu_supported(render_begin_gpu(context.render_data));
+    gpu_state = render_begin_gpu(context.render_data);
+    com_mod_context.set_gpu_supported(gpu_state != GpuContextState::Unsupported);
   }
 
   com_cache.recreate_if_needed(
@@ -286,9 +301,7 @@ static void compositor_modifier_apply(ModifierApplyContext &context,
   com_mod_context.evaluate();
   com_mod_context.cache_manager().reset();
   com_mod_context.free_resources();
-  if (com_mod_context.use_gpu()) {
-    render_end_gpu(context.render_data);
-  }
+  render_end_gpu(context.render_data, gpu_state);
 
   context.result.translation += com_mod_context.get_result_translation();
 }
@@ -296,7 +309,7 @@ static void compositor_modifier_apply(ModifierApplyContext &context,
 static PointerRNA *modifier_panel_get_property_pointers(Panel *panel)
 {
   PointerRNA *ptr = ui::panel_custom_data_get(panel);
-  BLI_assert(!RNA_pointer_is_null(ptr));
+  BLI_assert(*ptr);
   BLI_assert(RNA_struct_is_a(ptr->type, RNA_StripModifier));
   ui::panel_context_pointer_set(panel, "modifier", ptr);
   return ptr;

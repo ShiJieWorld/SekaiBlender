@@ -136,7 +136,7 @@ Vector<std::string> import_vertex_morphs(PMXImportContext &ctx, const PMXModel &
         KeyBlock *basis = BKE_keyblock_add(key, "Basis");
         BKE_keyblock_convert_from_mesh(mesh, key, basis);
       }
-      else if (key->block.first == nullptr) {
+      else if (key->block.first() == nullptr) {
         KeyBlock *basis = BKE_keyblock_add(key, "Basis");
         BKE_keyblock_convert_from_mesh(mesh, key, basis);
       }

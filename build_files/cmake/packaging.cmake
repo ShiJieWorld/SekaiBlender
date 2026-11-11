@@ -23,7 +23,7 @@ set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/COPYING")
 set(CPACK_PACKAGE_INSTALL_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
 set(CPACK_PACKAGE_VERSION_MAJOR "1")
 set(CPACK_PACKAGE_VERSION_MINOR "0")
-set(CPACK_PACKAGE_VERSION_PATCH "0")
+set(CPACK_PACKAGE_VERSION_PATCH "1")
 
 
 # Get the build revision, note that this can get out-of-sync, so for packaging run cmake first.
@@ -88,8 +88,8 @@ if(APPLE)
 endif()
 
 if(WIN32)
-  set(CPACK_PACKAGE_INSTALL_DIRECTORY "SekaiBlender/SekaiBlender 1.0")
-  set(CPACK_PACKAGE_INSTALL_REGISTRY_KEY "SekaiBlender/SekaiBlender 1.0")
+  set(CPACK_PACKAGE_INSTALL_DIRECTORY "SekaiBlender/${SEKAIBLENDER_PRODUCT_VERSION_STRING}")
+  set(CPACK_PACKAGE_INSTALL_REGISTRY_KEY "SekaiBlender/${SEKAIBLENDER_PRODUCT_VERSION_STRING}")
 
   set(CPACK_NSIS_MUI_ICON ${CMAKE_SOURCE_DIR}/release/windows/icons/winblender.ico)
   set(CPACK_NSIS_COMPRESSOR "/SOLID lzma")
@@ -115,8 +115,8 @@ if(WIN32)
   set(CPACK_WIX_LIGHT_EXTRA_FLAGS -dcl:medium)
 endif()
 
-set(CPACK_PACKAGE_EXECUTABLES "SekaiBlender-launcher" "SekaiBlender 1.0")
-set(CPACK_CREATE_DESKTOP_LINKS "SekaiBlender-launcher" "SekaiBlender 1.0")
+set(CPACK_PACKAGE_EXECUTABLES "SekaiBlender-launcher" "${SEKAIBLENDER_PRODUCT_VERSION_STRING}")
+set(CPACK_CREATE_DESKTOP_LINKS "SekaiBlender-launcher" "${SEKAIBLENDER_PRODUCT_VERSION_STRING}")
 
 include(CPack)
 

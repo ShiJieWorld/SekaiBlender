@@ -1,9 +1,9 @@
 
 msgid ""
 msgstr ""
-"Project-Id-Version: Blender 5.3.0 Alpha (b'af9ba6af7621')\n"
+"Project-Id-Version: Blender 5.3.0 Release Candidate (b'f78a5e153839')\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-03 07:24+0000\n"
+"POT-Creation-Date: 2026-11-09 09:34+0000\n"
 "PO-Revision-Date: 2025-07-31 16:24+0000\n"
 "Last-Translator: leif larsen <linuxdk1978@gmail.com>\n"
 "Language-Team: Danish <https://translate.blender.org/projects/blender-ui/ui/da/>\n"
@@ -3028,6 +3028,10 @@ msgid "Use the active Collection of the current View Layer to instantiate import
 msgstr "Brug den aktive samling af det aktuelle visningslag til at instantiere importerede samlinger og objekter"
 
 
+msgid "Path"
+msgstr "Sti"
+
+
 msgid "Level"
 msgstr "Niveau"
 
@@ -3276,10 +3280,6 @@ msgid "Damping"
 msgstr "Dæmpning"
 
 
-msgid "Look"
-msgstr "udseende"
-
-
 msgid "Temperature"
 msgstr "Temperatur"
 
@@ -3473,10 +3473,6 @@ msgid "Mirror Ball"
 msgstr "Splejlkugle"
 
 
-msgid "Path"
-msgstr "Sti"
-
-
 msgid "Mean"
 msgstr "Middelværdi"
 
@@ -3620,10 +3616,6 @@ msgstr "Nøglebillede B"
 
 msgid "Starting"
 msgstr "Begynde"
-
-
-msgid "To"
-msgstr "Til"
 
 
 msgid "Layer Weight"
@@ -3838,6 +3830,10 @@ msgid "Error Message"
 msgstr "Fejl besked"
 
 
+msgid "Motion"
+msgstr "Bevægelse"
+
+
 msgid "3D View"
 msgstr "3D visning"
 
@@ -3874,12 +3870,12 @@ msgid "True Normal"
 msgstr "Sand normal"
 
 
+msgid "Look"
+msgstr "udseende"
+
+
 msgid "Keyframe not in F-Curve"
 msgstr "Nøglebillede er ikke i F-kurve"
-
-
-msgid "Motion"
-msgstr "Bevægelse"
 
 
 msgid "Key Color"

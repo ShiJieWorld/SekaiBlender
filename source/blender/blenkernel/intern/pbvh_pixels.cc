@@ -2,6 +2,10 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup bke
+ */
+
 #include <fmt/format.h>
 
 #include "BKE_attribute.hh"
@@ -251,7 +255,7 @@ static void do_encode_pixels(const uv_islands::MeshData &mesh_data,
                              const uv_islands::UVIslandsMask &uv_masks,
                              const GroupedSpan<BorderTriangle> border_tris,
                              Image &image,
-                             ImageUser &image_user,
+                             const ImageUser &image_user,
                              MeshNode &node,
                              PixelNode &pixel_node)
 {
@@ -300,6 +304,7 @@ static void do_encode_pixels(const uv_islands::MeshData &mesh_data,
     }
   }
 
+  ImageUser tile_user = image_user;
   for (ImageTile &tile : image.tiles) {
     image::ImageTileWrapper image_tile(&tile);
     const int2 tile_offset_i = image_tile.get_tile_offset();
@@ -317,8 +322,8 @@ static void do_encode_pixels(const uv_islands::MeshData &mesh_data,
       continue;
     }
 
-    image_user.tile = image_tile.get_tile_number();
-    ImBuf *image_buffer = BKE_image_acquire_ibuf(&image, &image_user, nullptr);
+    tile_user.tile = image_tile.get_tile_number();
+    ImBuf *image_buffer = BKE_image_acquire_ibuf(&image, &tile_user, nullptr);
     if (image_buffer == nullptr) {
       continue;
     }
@@ -406,7 +411,7 @@ static IndexMask find_nodes_to_update(Tree &pbvh, IndexMaskMemory &memory)
   return nodes_to_update;
 }
 
-static void apply_watertight_check(Tree &pbvh, Image &image, ImageUser &image_user)
+static void apply_watertight_check(Tree &pbvh, Image &image, const ImageUser &image_user)
 {
   ImageUser watertight = image_user;
   for (ImageTile &tile_data : image.tiles) {
@@ -463,7 +468,7 @@ static bool update_pixels(const Depsgraph &depsgraph,
                           const Object &object,
                           Tree &pbvh,
                           Image &image,
-                          ImageUser &image_user)
+                          const ImageUser &image_user)
 {
   IndexMaskMemory memory;
   const IndexMask nodes_to_update = find_nodes_to_update(pbvh, memory);
@@ -575,35 +580,15 @@ PixelData &data_get(Tree &pbvh)
   return *data;
 }
 
-/* TODO: This is a awkward to have to re-iterate over the image tiles to find the matching tile.
- * Investigate storing the pointer on the `UDIMTilePixels` struct instead, or storing this as a
- * second map in `ImageData` */
-static std::optional<image::ImageTileWrapper> find_image_tile(Image &image,
-                                                              const image::TileNumber tile_number)
-{
-  for (ImageTile &image_tile : image.tiles) {
-    image::ImageTileWrapper wrapper = image::ImageTileWrapper(&image_tile);
-    if (wrapper.get_tile_number() == tile_number) {
-      return std::make_optional(wrapper);
-    }
-  }
-  /* Logically, we should be unable to reference a image_tile here without having first gotten it
-   * from the image tile itself. */
-  BLI_assert(0);
-  return std::nullopt;
-}
-
 void mark_image_dirty(bke::pbvh::Node & /*node*/,
                       PixelNode &pixel_node,
-                      Image &image,
                       Map<image::TileNumber, ImBuf *> &buffers)
 {
   PRF_scope(ProfileCategory::Editor);
   if (pixel_node.flags.dirty) {
     for (UDIMTilePixels &tile : pixel_node.tiles) {
-      std::optional<image::ImageTileWrapper> image_tile = find_image_tile(image, tile.tile_number);
       ImBuf *image_buffer = buffers.lookup_default(tile.tile_number, nullptr);
-      if (image_buffer == nullptr || !image_tile) {
+      if (image_buffer == nullptr) {
         continue;
       }
 
@@ -622,7 +607,10 @@ void collect_dirty_tiles(PixelNode &node, Vector<image::TileNumber> &r_dirty_til
 
 namespace bke::pbvh {
 
-void build_pixels(const Depsgraph &depsgraph, Object &object, Image &image, ImageUser &image_user)
+void build_pixels(const Depsgraph &depsgraph,
+                  Object &object,
+                  Image &image,
+                  const ImageUser &image_user)
 {
   PRF_scope(ProfileCategory::Editor);
   Tree &pbvh = *object::pbvh_get(object);

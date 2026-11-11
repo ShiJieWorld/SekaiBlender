@@ -62,13 +62,14 @@
 #include "BKE_constraint.h"
 #include "BKE_effect.h"
 #include "BKE_fcurve_driver.h"
-#include "BKE_gpencil_modifier_legacy.h"
 #include "BKE_grease_pencil.hh"
+#include "BKE_grease_pencil_modifiers.h"
 #include "BKE_idprop.hh"
 #include "BKE_image.hh"
 #include "BKE_key.hh"
 #include "BKE_layer.hh"
 #include "BKE_lib_query.hh"
+#include "BKE_mask.hh"
 #include "BKE_material.hh"
 #include "BKE_mball.hh"
 #include "BKE_modifier.hh"
@@ -783,21 +784,21 @@ void DepsgraphRelationBuilder::build_object(Object *object)
   build_object_modifiers(object);
 
   /* Grease Pencil Modifiers. */
-  if (object->greasepencil_modifiers.first != nullptr) {
+  if (object->greasepencil_modifiers.first() != nullptr) {
     BuilderWalkUserData data;
     data.builder = this;
-    BKE_gpencil_modifiers_foreach_ID_link(object, modifier_walk, &data);
+    BKE_grease_pencil_modifiers_foreach_ID_link(object, modifier_walk, &data);
   }
 
   /* Shader FX. */
-  if (object->shader_fx.first != nullptr) {
+  if (object->shader_fx.first() != nullptr) {
     BuilderWalkUserData data;
     data.builder = this;
     BKE_shaderfx_foreach_ID_link(object, modifier_walk, &data);
   }
 
   /* Constraints. */
-  if (object->constraints.first != nullptr) {
+  if (object->constraints.first() != nullptr) {
     BuilderWalkUserData data;
     data.builder = this;
     BKE_constraints_id_loop(&object->constraints, constraint_walk, IDWALK_NOP, &data);
@@ -806,7 +807,7 @@ void DepsgraphRelationBuilder::build_object(Object *object)
   /* Object constraints. */
   OperationKey object_transform_simulation_init_key(
       &object->id, NodeType::TRANSFORM, OperationCode::TRANSFORM_SIMULATION_INIT);
-  if (object->constraints.first != nullptr) {
+  if (object->constraints.first() != nullptr) {
     OperationKey constraint_key(
         &object->id, NodeType::TRANSFORM, OperationCode::TRANSFORM_CONSTRAINTS);
     /* Constraint relations. */
@@ -840,7 +841,7 @@ void DepsgraphRelationBuilder::build_object(Object *object)
   build_object_data(object);
 
   /* Particle systems. */
-  if (object->particlesystem.first != nullptr) {
+  if (object->particlesystem.first() != nullptr) {
     build_particle_systems(object);
   }
 
@@ -987,9 +988,7 @@ void DepsgraphRelationBuilder::build_object_modifiers(Object *object)
 
 void DepsgraphRelationBuilder::build_object_data(Object *object)
 {
-  if (object->type == OB_EMPTY &&
-      (!BLI_listbase_is_empty(&object->modifiers) || object->instance_collection))
-  {
+  if (object->type == OB_EMPTY && !BLI_listbase_is_empty(&object->modifiers)) {
     build_object_data_empty(object);
     return;
   }
@@ -1767,7 +1766,7 @@ void DepsgraphRelationBuilder::build_animdata_nlastrip_targets(ID *id,
       build_animdata_action_targets(
           id, strip.action_slot_handle, adt_key, operation_from, strip.act);
     }
-    else if (strip.strips.first != nullptr) {
+    else if (strip.strips.first() != nullptr) {
       build_animdata_nlastrip_targets(id, adt_key, operation_from, &strip.strips);
     }
   }
@@ -1790,13 +1789,19 @@ void DepsgraphRelationBuilder::build_animdata_drivers(ID *id)
     build_driver(id, &fcu);
 
     /* prevent driver from occurring before its own animation... */
-    if (adt->action || adt->nla_tracks.first) {
+    if (adt->action || adt->nla_tracks.first_) {
       add_relation(adt_key, driver_key, "AnimData Before Drivers");
     }
 
     if (data_path_maybe_shared(*id, fcu.rna_path())) {
       add_relation(driver_unshare_key, driver_key, "Un-share shared data before drivers");
     }
+  }
+
+  /* Un-sharing writes to the driven properties, which can also be written by the animation. */
+  OperationKey animation_exit_key(id, NodeType::ANIMATION, OperationCode::ANIMATION_EXIT);
+  if (has_node(animation_exit_key) && has_node(driver_unshare_key)) {
+    add_relation(animation_exit_key, driver_unshare_key, "AnimData Before Un-share");
   }
 }
 
@@ -1865,6 +1870,10 @@ void DepsgraphRelationBuilder::build_action(bAction *dna_action)
   build_idproperties(dna_action->id.properties);
   build_idproperties(dna_action->id.system_properties);
 
+  for (TimeMarker &marker : dna_action->markers) {
+    build_idproperties(marker.prop);
+  }
+
   animrig::Action &action = dna_action->wrap();
   if (!action.is_empty()) {
     TimeSourceKey time_src_key;
@@ -1901,7 +1910,7 @@ void DepsgraphRelationBuilder::build_driver_data(ID *id, FCurve *fcu)
   }
   /* Parse the RNA path to find the target property pointer. */
   RNAPathKey property_entry_key(id, rna_path.c_str(), RNAPointerSource::ENTRY);
-  if (RNA_pointer_is_null(&property_entry_key.ptr)) {
+  if (!property_entry_key.ptr) {
     /* TODO(sergey): This would only mean that driver is broken.
      * so we can't create relation anyway. However, we need to avoid
      * adding drivers which are known to be buggy to a dependency
@@ -2140,7 +2149,7 @@ void DepsgraphRelationBuilder::build_driver_rna_path_variable(const OperationKey
                                                               const char *rna_path)
 {
   RNAPathKey variable_exit_key(target_prop, rna_path, RNAPointerSource::EXIT);
-  if (RNA_pointer_is_null(&variable_exit_key.ptr)) {
+  if (!variable_exit_key.ptr) {
     return;
   }
   if (is_same_bone_dependency(variable_exit_key, self_key) ||
@@ -2622,7 +2631,7 @@ void DepsgraphRelationBuilder::build_object_data_geometry(Object *object)
                OperationKey(&object->id, NodeType::INSTANCING, OperationCode::INSTANCE_GEOMETRY),
                "Transform -> Instance Geometry");
   /* Shader FX. */
-  if (object->shader_fx.first != nullptr) {
+  if (object->shader_fx.first() != nullptr) {
     ModifierUpdateDepsgraphContext ctx = {};
     ctx.scene = scene_;
     ctx.object = object;
@@ -2684,7 +2693,7 @@ void DepsgraphRelationBuilder::build_object_data_geometry(Object *object)
   Key *key = BKE_key_from_object(object);
   if (key != nullptr) {
     if (key->adt != nullptr) {
-      if (key->adt->action || key->adt->nla_tracks.first) {
+      if (key->adt->action || key->adt->nla_tracks.first_) {
         ComponentKey obdata_key(object->data, NodeType::GEOMETRY);
         ComponentKey adt_key(&key->id, NodeType::ANIMATION);
         add_relation(adt_key, obdata_key, "Animation");
@@ -3371,8 +3380,10 @@ void DepsgraphRelationBuilder::build_mask(Mask *mask)
   build_parameters(mask_id);
   /* Own mask animation. */
   OperationKey mask_animation_key(mask_id, NodeType::ANIMATION, OperationCode::MASK_ANIMATION);
-  TimeSourceKey time_src_key;
-  add_relation(time_src_key, mask_animation_key, "TimeSrc -> Mask Animation");
+  if (BKE_mask_is_animated(*mask)) {
+    TimeSourceKey time_src_key;
+    add_relation(time_src_key, mask_animation_key, "TimeSrc -> Mask Animation");
+  }
   /* Final mask evaluation. */
   OperationKey mask_eval_key(mask_id, NodeType::PARAMETERS, OperationCode::MASK_EVAL);
   add_relation(mask_animation_key, mask_eval_key, "Mask Animation -> Mask Eval");

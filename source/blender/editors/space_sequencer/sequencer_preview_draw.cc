@@ -424,7 +424,7 @@ static void draw_histogram(ARegion &region,
    * measurements are accurate. */
   const int font_id = BLF_set_default();
   float text_scale_x, text_scale_y;
-  ui::view2d_scale_get_inverse(&region.v2d, &text_scale_x, &text_scale_y);
+  ui::view2d_pixel_size_get(&region.v2d, &text_scale_x, &text_scale_y);
 
   float prev_label_right = -FLT_MAX;
 
@@ -512,7 +512,7 @@ static void draw_waveform_graticule(ARegion *region,
 
   const int font_id = BLF_set_default();
   float text_scale_x, text_scale_y;
-  ui::view2d_scale_get_inverse(&region->v2d, &text_scale_x, &text_scale_y);
+  ui::view2d_pixel_size_get(&region->v2d, &text_scale_x, &text_scale_y);
 
   float prev_label_top = -FLT_MAX;
 
@@ -671,7 +671,7 @@ static void draw_vectorscope_graticule(ARegion *region,
   /* Calculate size of single text letter. */
   char buf[2] = {'M', 0};
   float text_scale_x, text_scale_y;
-  ui::view2d_scale_get_inverse(&region->v2d, &text_scale_x, &text_scale_y);
+  ui::view2d_pixel_size_get(&region->v2d, &text_scale_x, &text_scale_y);
   float text_width, text_height;
   BLF_width_and_height(BLF_default(), buf, 1, &text_width, &text_height);
   text_width *= text_scale_x;
@@ -738,10 +738,14 @@ static void sequencer_draw_scopes(Scene *scene,
   /* Get display-space texture for scope values (positions, histogram bins).
    * Falls back to the raw input texture if no color management is needed. */
   gpu::Texture *scope_texture = seq::preview_cache_get_gpu_scope_texture(
-      scene, timeline_frame, 0, image_width, image_height);
+      scene, timeline_frame, space_sequencer.multiview_eye, 0, image_width, image_height);
   if (scope_texture == nullptr) {
-    scope_texture = seq::preview_cache_get_gpu_texture(
-        scene, timeline_frame, space_sequencer.chanshown, image_width, image_height);
+    scope_texture = seq::preview_cache_get_gpu_texture(scene,
+                                                       timeline_frame,
+                                                       space_sequencer.multiview_eye,
+                                                       space_sequencer.chanshown,
+                                                       image_width,
+                                                       image_height);
   }
 
   SeqQuadsBatch quads;
@@ -934,7 +938,12 @@ static void update_gpu_scopes(const ImBuf *input_ibuf,
   const int width = GPU_texture_width(input_texture);
   const int height = GPU_texture_height(input_texture);
   gpu::Texture *scope_texture = seq::preview_cache_get_gpu_scope_texture(
-      scene, timeline_frame, space_sequencer.chanshown, width, height);
+      scene,
+      timeline_frame,
+      space_sequencer.multiview_eye,
+      space_sequencer.chanshown,
+      width,
+      height);
   if (scope_texture != nullptr) {
     return;
   }
@@ -988,8 +997,11 @@ static void update_gpu_scopes(const ImBuf *input_ibuf,
   GPU_matrix_pop();
   GPU_matrix_pop_projection();
 
-  seq::preview_cache_set_gpu_scope_texture(
-      scene, timeline_frame, space_sequencer.chanshown, scope_texture);
+  seq::preview_cache_set_gpu_scope_texture(scene,
+                                           timeline_frame,
+                                           space_sequencer.multiview_eye,
+                                           space_sequencer.chanshown,
+                                           scope_texture);
 }
 
 static void update_cpu_scopes(const SpaceSeq &space_sequencer,
@@ -1013,45 +1025,6 @@ static void update_cpu_scopes(const SpaceSeq &space_sequencer,
   }
   scopes.last_ibuf = &ibuf;
   scopes.last_timeline_frame = timeline_frame;
-}
-
-static bool sequencer_draw_get_transform_preview(const SpaceSeq &sseq, const Scene &scene)
-{
-  if (scene.ed->runtime->show_transform_preview && (sseq.draw_flag & SEQ_DRAW_TRANSFORM_PREVIEW)) {
-    return true;
-  }
-
-  Strip *last_seq = seq::select_active_get(&scene);
-  if (last_seq == nullptr) {
-    return false;
-  }
-
-  return (G.moving & G_TRANSFORM_SEQ) && (last_seq->flag & SEQ_SELECT) &&
-         ((last_seq->flag & SEQ_LEFTSEL) || (last_seq->flag & SEQ_RIGHTSEL)) &&
-         (sseq.draw_flag & SEQ_DRAW_TRANSFORM_PREVIEW);
-}
-
-static int sequencer_draw_get_transform_preview_frame(const Scene *scene)
-{
-  int preview_frame;
-
-  if (scene->ed->runtime->show_transform_preview) {
-    preview_frame = scene->ed->runtime->transform_preview_frame;
-    return preview_frame;
-  }
-
-  Strip *last_seq = seq::select_active_get(scene);
-  /* #sequencer_draw_get_transform_preview must already have been called. */
-  BLI_assert(last_seq != nullptr);
-
-  if (last_seq->flag & SEQ_RIGHTSEL) {
-    preview_frame = last_seq->right_handle(scene) - 1;
-  }
-  else {
-    preview_frame = last_seq->left_handle();
-  }
-
-  return preview_frame;
 }
 
 static void strip_draw_image_origin_and_outline(const bContext *C,
@@ -1825,8 +1798,9 @@ static void sequencer_preview_draw_overlays(const bContext *C,
 
 void sequencer_preview_region_draw(const bContext *C, ARegion *region)
 {
+  const wmWindowManager *wm = CTX_wm_manager(C);
   const ScrArea *area = CTX_wm_area(C);
-  const SpaceSeq &space_sequencer = *static_cast<const SpaceSeq *>(area->spacedata.first);
+  const SpaceSeq &space_sequencer = *area->spacedata.first_as<SpaceSeq>();
   Scene *scene = CTX_data_sequencer_scene(C);
 
   /* Check if preview needs to be drawn at all. Note: do not draw preview region when
@@ -1861,10 +1835,10 @@ void sequencer_preview_region_draw(const bContext *C, ARegion *region)
   const bool need_reference_frame = draw_frame_overlay && space_sequencer.overlay_frame_type !=
                                                               SEQ_OVERLAY_FRAME_TYPE_CURRENT;
 
-  int timeline_frame = render_data.cfra;
-  if (sequencer_draw_get_transform_preview(space_sequencer, *scene)) {
-    timeline_frame = sequencer_draw_get_transform_preview_frame(scene);
-  }
+  const bool show_edit_point = (space_sequencer.draw_flag & SEQ_DRAW_EDIT_POINT_PREVIEW) &&
+                               !ED_screen_animation_playing(wm);
+  const int timeline_frame = show_edit_point ? editing.edit_point().value_or(render_data.cfra) :
+                                               render_data.cfra;
 
   /* GPU textures for the current and reference frames.
    *
@@ -1891,12 +1865,19 @@ void sequencer_preview_region_draw(const bContext *C, ARegion *region)
     current_ibuf = sequencer_ibuf_get(
         C, timeline_frame, view_names[space_sequencer.multiview_eye]);
     if (use_gpu_texture && current_ibuf) {
-      current_texture = seq::preview_cache_get_gpu_texture(
-          scene, timeline_frame, space_sequencer.chanshown, current_ibuf->x, current_ibuf->y);
+      current_texture = seq::preview_cache_get_gpu_texture(scene,
+                                                           timeline_frame,
+                                                           space_sequencer.multiview_eye,
+                                                           space_sequencer.chanshown,
+                                                           current_ibuf->x,
+                                                           current_ibuf->y);
       if (current_texture == nullptr) {
         current_texture = create_texture(*current_ibuf);
-        seq::preview_cache_set_gpu_texture(
-            scene, timeline_frame, space_sequencer.chanshown, current_texture);
+        seq::preview_cache_set_gpu_texture(scene,
+                                           timeline_frame,
+                                           space_sequencer.multiview_eye,
+                                           space_sequencer.chanshown,
+                                           current_texture);
       }
     }
   }

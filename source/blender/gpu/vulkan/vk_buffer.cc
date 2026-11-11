@@ -112,13 +112,13 @@ bool VKBuffer::create(size_t size_in_bytes,
     return false;
   }
 
-  resource_.resource_handle = device.resources.add_buffer(resource_.vk_handle);
+  resource_.resource_handle = device.resources.add_buffer(resource_.vk_handle, allocation_);
 
   if (bool(create_info.usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT)) {
     VkBufferDeviceAddressInfo vk_buffer_device_address_info = {
         VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, nullptr, resource_};
-    vk_device_address = device.functions.vkGetBufferDeviceAddress(device.vk_handle(),
-                                                                  &vk_buffer_device_address_info);
+    vk_device_address = device.functions.vkGetBufferDeviceAddressKHR(
+        device.vk_handle(), &vk_buffer_device_address_info);
   }
 
   if (debug_name) {
@@ -268,25 +268,15 @@ bool VKBuffer::free()
     unmap();
   }
 
-  VKDiscardPool::discard_pool_get().discard_buffer(resource_, allocation_);
-
+  /* Release the owner reference; at zero ref count the buffer becomes discardable. */
+  if (resource_.vk_handle != VK_NULL_HANDLE) {
+    VKDevice &device = VKBackend::get().device;
+    device.resources.deref_resource(resource_.resource_handle);
+  }
   allocation_ = VK_NULL_HANDLE;
   resource_ = {};
 
   return true;
-}
-
-void VKBuffer::free_immediately(VKDevice &device)
-{
-  BLI_assert(resource_.vk_handle != VK_NULL_HANDLE);
-  BLI_assert(allocation_ != VK_NULL_HANDLE);
-  if (is_mapped()) {
-    unmap();
-  }
-  device.resources.remove_buffer(resource_);
-  vmaDestroyBuffer(device.mem_allocator_get(), resource_, allocation_);
-  allocation_ = VK_NULL_HANDLE;
-  resource_ = {};
 }
 
 }  // namespace gpu

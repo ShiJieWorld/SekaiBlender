@@ -1,9 +1,9 @@
 
 msgid ""
 msgstr ""
-"Project-Id-Version: Blender 5.3.0 Alpha (b'af9ba6af7621')\n"
+"Project-Id-Version: Blender 5.3.0 Release Candidate (b'f78a5e153839')\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-03 07:24+0000\n"
+"POT-Creation-Date: 2026-11-09 09:34+0000\n"
 "PO-Revision-Date: 2026-03-19 19:12+0000\n"
 "Last-Translator: Tamás Máté <royalpython132@gmail.com>\n"
 "Language-Team: Hungarian <https://translate.blender.org/projects/blender-ui/ui/hu/>\n"
@@ -1096,10 +1096,6 @@ msgid "Particles"
 msgstr "Részecskék"
 
 
-msgid "Project"
-msgstr "Vetítés"
-
-
 msgid "Shape Keys"
 msgstr "Formakulcsok"
 
@@ -1126,6 +1122,14 @@ msgstr "Fő ablakkezelők"
 
 msgid "Collection of window managers"
 msgstr "Ablakkezelők gyűjteménye"
+
+
+msgid "Project"
+msgstr "Vetítés"
+
+
+msgid "Path"
+msgstr "Útvonal"
 
 
 msgid "Speed"
@@ -1279,6 +1283,10 @@ msgid "Active Layer"
 msgstr "Aktív réteg"
 
 
+msgid "Cyclic"
+msgstr "Ciklikus"
+
+
 msgid "Keep material assigned to brush"
 msgstr "Az ecsethez rendelt anyag megtartása"
 
@@ -1367,14 +1375,6 @@ msgid "Enabled"
 msgstr "Engedélyezett"
 
 
-msgid "Display"
-msgstr "Kijelző"
-
-
-msgid "Input Color Space"
-msgstr "Bemeneti színtér"
-
-
 msgid "Color space that the sequencer operates in"
 msgstr "Színtér, amiben a szekvencer működik"
 
@@ -1401,10 +1401,6 @@ msgstr "Görbék használata"
 
 msgid "Use RGB curved for pre-display transformation"
 msgstr "RGB görbék használata az előzetes-megjelenítés taranszformációhoz"
-
-
-msgid "View"
-msgstr "Nézet"
 
 
 msgid "Brightness"
@@ -1958,10 +1954,6 @@ msgstr "Y"
 
 msgid "Target Object (Curves only)"
 msgstr "Célobjektum (csak görbék)"
-
-
-msgid "Cyclic"
-msgstr "Ciklikus"
 
 
 msgid "Treat curve as cyclic curve (no clamping to curve bounding box)"
@@ -2962,6 +2954,10 @@ msgstr "Felosztás"
 
 msgid "Plane"
 msgstr "Síklap"
+
+
+msgid "View"
+msgstr "Nézet"
 
 
 msgid "Radius"
@@ -4288,10 +4284,6 @@ msgid "Map Taper"
 msgstr "Hozzárendelés típusa"
 
 
-msgid "Path"
-msgstr "Útvonal"
-
-
 msgid "Text Selected"
 msgstr "Kijelölt szöveg"
 
@@ -5245,6 +5237,10 @@ msgid "Simple"
 msgstr "Egyszerű"
 
 
+msgid "Display"
+msgstr "Kijelző"
+
+
 msgid "Steps"
 msgstr "Lépések"
 
@@ -5827,22 +5823,6 @@ msgstr "Billentyű-hozzárendelési esemény és beállítási részletek mutat�
 
 msgid "Type of event"
 msgstr "Esemény típusa"
-
-
-msgid "Press"
-msgstr "Lenyomás"
-
-
-msgid "Release"
-msgstr "Felengedés"
-
-
-msgid "Click"
-msgstr "Kattintás"
-
-
-msgid "Double Click"
-msgstr "Dupla Kattintás"
 
 
 msgid "Left Handle"
@@ -6622,10 +6602,6 @@ msgid "Metaball"
 msgstr "Meta test"
 
 
-msgid "Import"
-msgstr "Importálás"
-
-
 msgid "Mirror"
 msgstr "Tükrözés"
 
@@ -6640,6 +6616,10 @@ msgstr "Navigáció"
 
 msgid "Align View"
 msgstr "Nézet igazítása"
+
+
+msgid "Import"
+msgstr "Importálás"
 
 
 msgid "UV"
@@ -9224,14 +9204,6 @@ msgid "Color Key"
 msgstr "Szín kulcs"
 
 
-msgid "From"
-msgstr "Ettől"
-
-
-msgid "To"
-msgstr "Eddig"
-
-
 msgid "Use Material layer"
 msgstr "Anyagréteg használata"
 
@@ -9781,11 +9753,6 @@ msgstr "Ismétlés használata"
 msgctxt "Operator"
 msgid "Reset Transform"
 msgstr "Átalakítást alaphelyzetbe"
-
-
-msgctxt "Operator"
-msgid "Accept"
-msgstr "Elfogadás"
 
 
 msgid "Select the file relative to the blend file"
@@ -12107,6 +12074,10 @@ msgid "Deselect All"
 msgstr "Összes elem kijelölése (megszüntetése)"
 
 
+msgid "Add a text strip to the sequencer"
+msgstr "Egy textsáv hozzűáadása a szekvenszerhez"
+
+
 msgid "View all the strips in the sequencer"
 msgstr "Mutassa az összes sávot"
 
@@ -12586,6 +12557,14 @@ msgid "Debug Menu"
 msgstr "Hibamegoldó menü"
 
 
+msgid "Trusted Source"
+msgstr "Megbízható forrás"
+
+
+msgid "Allow .blend file to execute scripts automatically, default available from system preferences"
+msgstr "Szkriptek automatikus futtatásának engedélyezése a .blend fájlnak, az alapértelmezés elérhető a rendszerbeállításokból"
+
+
 msgid "Include selected frames"
 msgstr "Kijelölt képkockák bevonása"
 
@@ -12608,14 +12587,6 @@ msgstr "Felhasználói felület beállítások betöltése .blend fájlokban"
 
 msgid "State"
 msgstr "Állapot"
-
-
-msgid "Trusted Source"
-msgstr "Megbízható forrás"
-
-
-msgid "Allow .blend file to execute scripts automatically, default available from system preferences"
-msgstr "Szkriptek automatikus futtatásának engedélyezése a .blend fájlnak, az alapértelmezés elérhető a rendszerbeállításokból"
 
 
 msgid "Set the active operator to its default values"
@@ -12890,10 +12861,6 @@ msgstr "Fejlesztés"
 
 msgid "Menus"
 msgstr "Menük"
-
-
-msgid "Auto Run Python Scripts"
-msgstr "Python szkriptek automatikus futtatása"
 
 
 msgid "Bone Color Sets"
@@ -13237,6 +13204,10 @@ msgstr "Fájltömörítés engedélyezése .blend fájlok mentésekor"
 
 msgid "Load user interface setup when loading .blend files"
 msgstr "Felhasználói felület beállítások betöltése .blend fájlok betöltésekor"
+
+
+msgid "Auto Run Python Scripts"
+msgstr "Python szkriptek automatikus futtatása"
 
 
 msgid "Allow any .blend file to run scripts automatically (unsafe with blend files from an untrusted source)"
@@ -14871,6 +14842,14 @@ msgid "Occlude objects with the environment color as they are further away"
 msgstr "Objektumok elnyelése a környezeti szín által, minnél távolabb vannak"
 
 
+msgid "Press"
+msgstr "Lenyomás"
+
+
+msgid "Release"
+msgstr "Felengedés"
+
+
 msgid "XR Data for Window Manager Event"
 msgstr "XR adat ablakkezelő eseményhez"
 
@@ -15073,11 +15052,6 @@ msgid "All"
 msgstr "Mind"
 
 
-msgctxt "Operator"
-msgid "Report a Bug"
-msgstr "Hiba bejelentése"
-
-
 msgid "Object Index"
 msgstr "Objektum index"
 
@@ -15085,6 +15059,10 @@ msgstr "Objektum index"
 msgctxt "Operator"
 msgid "Clear"
 msgstr "Törlés"
+
+
+msgid "Motion"
+msgstr "Mozgás"
 
 
 msgctxt "Operator"
@@ -15125,6 +15103,11 @@ msgstr "Figyelmeztetés:"
 msgctxt "Operator"
 msgid "Documentation"
 msgstr "Dokumentáció"
+
+
+msgctxt "Operator"
+msgid "Report a Bug"
+msgstr "Hiba bejelentése"
 
 
 msgid "File:"
@@ -15573,6 +15556,11 @@ msgstr "Minden kijelölése típus alapján"
 
 
 msgctxt "Operator"
+msgid "Text"
+msgstr "Szöveg"
+
+
+msgctxt "Operator"
 msgid "Delete Keyframes..."
 msgstr "Kulcs-képkockák törlése..."
 
@@ -15595,11 +15583,6 @@ msgstr "Jobb"
 msgctxt "Operator"
 msgid "Color"
 msgstr "Szín"
-
-
-msgctxt "Operator"
-msgid "Text"
-msgstr "Szöveg"
 
 
 msgctxt "Operator"
@@ -16004,6 +15987,10 @@ msgid "KeyingSet"
 msgstr "Kulcskészlet"
 
 
+msgid "GP_Layer"
+msgstr "GP_Réteg"
+
+
 msgid "Const"
 msgstr "kényszer"
 
@@ -16015,10 +16002,6 @@ msgstr "Szín"
 msgctxt "Brush"
 msgid "Surface"
 msgstr "Felület"
-
-
-msgid "GP_Layer"
-msgstr "GP_Réteg"
 
 
 msgid "Basis"
@@ -16676,10 +16659,6 @@ msgid " Named Attributes"
 msgstr " Elnevezett tulajdonságok"
 
 
-msgid "Add a text strip to the sequencer"
-msgstr "Egy textsáv hozzűáadása a szekvenszerhez"
-
-
 msgid "Add a color mix effect strip to the sequencer"
 msgstr "Egy színkeverő effektsáv hozzáadása a szekvenszerhez"
 
@@ -16704,6 +16683,10 @@ msgid "Z:"
 msgstr "Z:"
 
 
+msgid "Dimensions:"
+msgstr "Dimenziók:"
+
+
 msgid "Crease:"
 msgstr "Domborítás:"
 
@@ -16714,10 +16697,6 @@ msgstr "Sugár:"
 
 msgid "Weight:"
 msgstr "Súly:"
-
-
-msgid "Dimensions:"
-msgstr "Dimenziók:"
 
 
 msgid "Size:"
@@ -16802,10 +16781,6 @@ msgstr "Kiterjedés"
 
 msgid "Create Along Paths"
 msgstr "Létrehozás útvonal mentén"
-
-
-msgid "Motion"
-msgstr "Mozgás"
 
 
 msgid "Global Influence:"

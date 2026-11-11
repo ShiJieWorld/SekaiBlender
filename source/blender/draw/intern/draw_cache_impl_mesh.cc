@@ -83,9 +83,9 @@ static void discard_buffers(MeshBatchCache &cache,
     if (buffer_ptrs.contains(batch.elem)) {
       return true;
     }
-    if (std::any_of(batch.verts, batch.verts + ARRAY_SIZE(batch.verts), [&](gpu::VertBuf *vbo) {
-          return vbo && buffer_ptrs.contains(vbo);
-        }))
+    if (std::any_of(batch.verts,
+                    batch.verts + ARRAY_SIZE(batch.verts),
+                    [&](gpu::VertBuf *vbo) { return vbo && buffer_ptrs.contains(vbo); }))
     {
       return true;
     }
@@ -164,8 +164,8 @@ static void mesh_cd_calc_active_mask_uv_layer(const Object &object,
 
 static bool attribute_exists(const Mesh &mesh, const StringRef name)
 {
-  if (BMEditMesh *em = mesh.runtime->edit_mesh.get()) {
-    return bool(BM_data_layer_lookup(*em->bm, name));
+  if (const BMesh *bm = BKE_editmesh_bmesh_get(&mesh)) {
+    return bool(BM_data_layer_lookup(*bm, name));
   }
   return mesh.attributes().contains(name);
 };
@@ -174,8 +174,8 @@ static std::optional<bke::AttributeMetaData> lookup_meta_data(const Mesh &mesh,
                                                               const StringRef name)
 {
   if (mesh.runtime->wrapper_type == ME_WRAPPER_TYPE_BMESH) {
-    if (BMEditMesh *em = mesh.runtime->edit_mesh.get()) {
-      if (const BMDataLayerLookup attr = BM_data_layer_lookup(*em->bm, name)) {
+    if (const BMesh *bm = BKE_editmesh_bmesh_get(&mesh)) {
+      if (const BMDataLayerLookup attr = BM_data_layer_lookup(*bm, name)) {
         return bke::AttributeMetaData{attr.domain, attr.type};
       }
       return std::nullopt;
@@ -587,6 +587,9 @@ static void mesh_buffer_cache_clear(MeshBufferCache *mbc)
 
   mbc->loose_geom = {};
   mbc->face_sorted = {};
+  mbc->corner_verts.reset();
+  mbc->corner_edges.reset();
+  mbc->face_offsets.reset();
 }
 
 static void mesh_batch_cache_free_subdiv_cache(MeshBatchCache &cache)

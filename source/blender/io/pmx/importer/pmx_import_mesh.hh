@@ -55,16 +55,16 @@ struct PMXMaterialImportReport {
 };
 
 struct PMXImportContext {
-  Main *bmain;
-  Scene *scene;
-  ViewLayer *view_layer;
-  Object *mesh_obj;              /**< Primary mesh object (legacy). */
-  Object *root_obj;              /**< Unified PMX model root Empty. */
-  Collection *model_collection;   /**< Collection containing this PMX import. */
-  Collection *geometry_collection; /**< Child collection for imported Mesh objects. */
-  Collection *controls_collection; /**< Child collection for Morph Controller objects. */
-  Object *armature_obj;           /**< Created armature object, set by create_armature_object(). */
-  Object *morph_controller_obj;   /**< Shape-key controller object for vertex morphs. */
+  Main *bmain = nullptr;
+  Scene *scene = nullptr;
+  ViewLayer *view_layer = nullptr;
+  Object *mesh_obj = nullptr;              /**< Primary mesh object (legacy). */
+  Object *root_obj = nullptr;              /**< Unified PMX model root Empty. */
+  Collection *model_collection = nullptr;   /**< Collection containing this PMX import. */
+  Collection *geometry_collection = nullptr; /**< Child collection for imported Mesh objects. */
+  Collection *controls_collection = nullptr; /**< Child collection for Morph Controller objects. */
+  Object *armature_obj = nullptr;           /**< Created armature object, set by create_armature_object(). */
+  Object *morph_controller_obj = nullptr;   /**< Shape-key controller object for vertex morphs. */
   Vector<Object *> mesh_objects; /**< All mesh objects created in this import. */
   Vector<SubMeshInfo> sub_meshes; /**< Vertex mapping for split mode (empty in single mode). */
   Vector<std::string> morph_names; /**< PMX vertex morph index order → Blender shape key name. */
@@ -73,9 +73,9 @@ struct PMXImportContext {
   PMXGroupMorphReport group_morph_report;
   /** C2-2D expanded expressions consumed by Geometry Driver creation. */
   PMXGroupMorphReport group_morph_expression_report;
-  const PMXImportParams *params;
-  ReportList *reports;
-  const std::vector<PMXTexture> *model_textures;
+  const PMXImportParams *params = nullptr;
+  ReportList *reports = nullptr;
+  const std::vector<PMXTexture> *model_textures = nullptr;
   Map<std::string, PMXTextureLoadResult> texture_cache;
   Map<int, Material *> material_cache;
   PMXMaterialImportReport material_report;

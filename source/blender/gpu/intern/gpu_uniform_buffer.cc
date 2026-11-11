@@ -23,6 +23,7 @@
 #include "GPU_capabilities.hh"
 #include "GPU_context.hh"
 #include "GPU_material.hh"
+#include "GPU_shader_shared_utils.hh"
 
 #include "GPU_uniform_buffer.hh"
 #include "gpu_context_private.hh"
@@ -108,7 +109,7 @@ static void gpu_constant_populate_ubo(void *destination,
     case GPU_VEC4:
     case GPU_MAT4: {
       const Span<float> span = gpu_constant_to_float_span(data, type);
-      memcpy(destination, span.data(), static_cast<size_t>(span.size_in_bytes()));
+      memcpy(destination, span.data(), size_t(span.size_in_bytes()));
       return;
     }
     case GPU_INT:
@@ -116,12 +117,12 @@ static void gpu_constant_populate_ubo(void *destination,
     case GPU_INT3:
     case GPU_INT4: {
       const Span<int> span = gpu_constant_to_int_span(data, type);
-      memcpy(destination, span.data(), static_cast<size_t>(span.size_in_bytes()));
+      memcpy(destination, span.data(), size_t(span.size_in_bytes()));
       return;
     }
     case GPU_BOOL: {
       /* Pad bool to 4 bytes in UBO. */
-      const int32_t value = gpu_constant_to_bool(data) ? 1 : 0;
+      const bool32_t value = gpu_constant_to_bool(data) ? 1 : 0;
       memcpy(destination, &value, sizeof(value));
       return;
     }
@@ -208,6 +209,8 @@ static inline bool is_ubo_supported_type(const GPUType type)
     case GPU_TEX3D:
     case GPU_CLOSURE:
     case GPU_ATTR:
+    case GPU_KERNEL_GLOBALS:
+    case GPU_SHADING_DATA:
       return false;
   }
 
@@ -219,7 +222,7 @@ static inline bool is_ubo_supported_type(const GPUType type)
  * Make sure we respect the expected alignment of UBOs.
  * mat4, vec4, int4, pad vec3 and int3 as vec4 and int4, vec2, int2, float, int, bool.
  */
-static void buffer_from_list_inputs_sort(ListBaseT<LinkData> *inputs)
+void GPU_uniformbuf_inputs_sort(ListBaseT<LinkData> *inputs)
 {
   /* Order them as mat4, vec4, int4, vec3, int3, vec2, int2, float, int, bool. */
   BLI_listbase_sort(inputs, inputs_cmp);
@@ -319,7 +322,7 @@ gpu::UniformBuf *GPU_uniformbuf_create_from_list(ListBaseT<LinkData> *inputs, co
     return nullptr;
   }
 
-  buffer_from_list_inputs_sort(inputs);
+  GPU_uniformbuf_inputs_sort(inputs);
   size_t buffer_size = buffer_size_from_list(inputs);
   void *data = MEM_new_uninitialized(buffer_size, __func__);
   buffer_fill_from_list(data, inputs);
