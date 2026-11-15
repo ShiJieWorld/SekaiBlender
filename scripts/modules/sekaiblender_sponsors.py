@@ -40,6 +40,39 @@ SORT_ITEMS = (
     ("AMOUNT", "按金额", "金额高的在前"),
 )
 
+# Purple interaction accent used by the SekaiBlender theme preset.
+BRAND_ACCENT = (0.45, 0.39, 0.62, 1.0)
+BRAND_ACCENT_LIGHT = (0.60, 0.53, 0.80, 1.0)
+BRAND_WIDGETS = (
+    "wcol_regular",
+    "wcol_tool",
+    "wcol_toolbar_item",
+    "wcol_radio",
+    "wcol_option",
+    "wcol_toggle",
+    "wcol_num",
+    "wcol_numslider",
+    "wcol_menu",
+    "wcol_menu_back",
+    "wcol_menu_item",
+    "wcol_tooltip",
+    "wcol_progress",
+    "wcol_list_item",
+)
+
+
+def apply_default_theme(theme) -> None:
+    """Apply the SekaiBlender accent to an untouched factory-default theme."""
+    ui = theme.user_interface
+    for widget_name in BRAND_WIDGETS:
+        getattr(ui, widget_name).inner_sel = BRAND_ACCENT
+    ui.wcol_num.item = BRAND_ACCENT_LIGHT
+    ui.wcol_numslider.item = BRAND_ACCENT_LIGHT
+    ui.wcol_progress.item = BRAND_ACCENT_LIGHT
+    ui.panel_active = BRAND_ACCENT
+    theme.common.anim.playhead = BRAND_ACCENT_LIGHT
+    theme.name = "SekaiBlender"
+
 
 def sorted_sponsors(sort_mode: str, descending: bool = True):
     sponsors = list(SPONSORS)
