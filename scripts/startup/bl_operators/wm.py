@@ -3749,23 +3749,27 @@ class WM_MT_splash_sponsors(Menu):
         layout.label(text="更新于 {:s}".format(ROSTER_UPDATED))
         layout.separator(type='LINE')
 
-        # Fixed PAGE_SIZE cells so the pager never rides the last filled row.
-        grid = layout.grid_flow(
-            row_major=True,
-            columns=2,
-            even_columns=True,
-            even_rows=True,
-            align=True,
-        )
-        cell_scale = max(0.95, float(getattr(wm, "splash_sponsor_cell_scale", 1.15)))
-        for item in page_items:
-            cell = grid.box()
-            cell.scale_y = cell_scale
-            if item is None:
-                cell.label(text=" ")
-            else:
+        visible_items = [item for item in page_items if item is not None]
+        if not visible_items:
+            empty = layout.box()
+            empty.label(text="暂无赞助者", icon='INFO')
+        else:
+            # Short rosters get one column so long names use the full panel
+            # width; switch to two columns once the list grows.
+            columns = 1 if total <= 4 else 2
+            grid = layout.grid_flow(
+                row_major=True,
+                columns=columns,
+                even_columns=True,
+                even_rows=True,
+                align=True,
+            )
+            cell_scale = max(0.95, float(getattr(wm, "splash_sponsor_cell_scale", 1.15)))
+            for item in visible_items:
+                cell = grid.box()
+                cell.scale_y = cell_scale
                 # Name and meta on separate lines so YYYY-MM-DD / ¥amount
-                # are not ellipsized in the narrow two-column cells.
+                # are not ellipsized in the narrow cells.
                 cell.label(text=item["name"])
                 meta = cell.row()
                 meta.scale_y = 0.8
@@ -3774,16 +3778,17 @@ class WM_MT_splash_sponsors(Menu):
                 else:
                     meta.label(text=item.get("joined", ""))
 
-        layout.separator(type='LINE')
-        nav = layout.row(align=True)
-        prev = nav.operator("wm.splash_sponsor_page", text="", icon='TRIA_LEFT')
-        prev.delta = -1
-        nav.label(
-            text=iface_("{:d} / {:d} · {:d}").format(page + 1, pages, total),
-            translate=False,
-        )
-        nxt = nav.operator("wm.splash_sponsor_page", text="", icon='TRIA_RIGHT')
-        nxt.delta = 1
+        if pages > 1:
+            layout.separator(type='LINE')
+            nav = layout.row(align=True)
+            prev = nav.operator("wm.splash_sponsor_page", text="", icon='TRIA_LEFT')
+            prev.delta = -1
+            nav.label(
+                text=iface_("{:d} / {:d} · {:d}").format(page + 1, pages, total),
+                translate=False,
+            )
+            nxt = nav.operator("wm.splash_sponsor_page", text="", icon='TRIA_RIGHT')
+            nxt.delta = 1
 
 
 class WM_MT_splash_about(Menu):

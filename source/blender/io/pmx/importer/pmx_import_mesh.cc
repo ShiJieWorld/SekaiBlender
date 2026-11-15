@@ -36,7 +36,9 @@
 #include <cmath>
 #include <cstdint>
 #include <map>
+#include <set>
 #include <stdexcept>
+#include <tuple>
 
 #include "DEG_depsgraph.hh"
 #include "DEG_depsgraph_build.hh"
@@ -147,15 +149,65 @@ static void apply_overlapping_material_blend(PMXImportContext &ctx,
   }
 }
 
-static Mesh *create_mesh_data(const PMXModel &model, const PMXImportParams &params)
+static Mesh *create_mesh_data(const PMXModel &model,
+                              const PMXImportParams &params,
+                              ReportList *reports)
 {
   const int vert_num = int(model.vertices.size());
   const int face_num = int(model.face_indices.size() / 3);
-  const int corner_num = int(model.face_indices.size());
 
   BLI_assert(model.face_indices.size() % 3 == 0);
 
-  Mesh *mesh = BKE_mesh_new_nomain(vert_num, 0, face_num, corner_num);
+  /* PMX files may contain degenerate triangles whose three corner indices are
+   * not distinct (authoring/padding artifacts; found in real distributed
+   * models, e.g. MME controller props). They must not reach the mesh: the
+   * custom-normal computation walks the lnor-space fan through corner-edge
+   * topology that a repeated-index face corrupts, indexing past the corner
+   * normal array (EXCEPTION_ACCESS_VIOLATION), and when the out-of-bounds
+   * access lands on mapped memory it silently corrupts the heap instead —
+   * which was observed destroying persisted data elsewhere in the same
+   * session. Duplicate faces (same three vertices, same winding; 104 found in
+   * one 星穹铁道 prop) poison the same fan walk. Skip both and keep the
+   * first occurrence of every valid face. */
+  Vector<int> kept_faces;
+  kept_faces.reserve(face_num);
+  int repeated_index_faces = 0;
+  int duplicate_faces = 0;
+  std::set<std::tuple<int, int, int>> seen_faces;
+  for (const int face : IndexRange(face_num)) {
+    const int a = model.face_indices[face * 3 + 0];
+    const int b = model.face_indices[face * 3 + 1];
+    const int c = model.face_indices[face * 3 + 2];
+    if (a == b || b == c || a == c) {
+      repeated_index_faces++;
+      continue;
+    }
+    /* Cyclic normalization (smallest vertex leads) so a rotation of the same
+     * triangle counts as a duplicate. */
+    std::tuple<int, int, int> key = a <= b && a <= c ? std::make_tuple(a, b, c) :
+                                     (b <= a && b <= c ? std::make_tuple(b, c, a) :
+                                                         std::make_tuple(c, a, b));
+    if (!seen_faces.insert(key).second) {
+      duplicate_faces++;
+      continue;
+    }
+    kept_faces.append(face);
+  }
+  const int kept_face_num = int(kept_faces.size());
+  const int skipped_face_num = face_num - kept_face_num;
+  if (skipped_face_num > 0 && reports != nullptr) {
+    BKE_reportf(reports,
+                RPT_WARNING,
+                "PMX mesh: skipped %d degenerate face(s) with repeated vertex indices "
+                "and %d duplicate face(s) (%d of %d faces kept)",
+                repeated_index_faces,
+                duplicate_faces,
+                kept_face_num,
+                face_num);
+  }
+  const int corner_num = kept_face_num * 3;
+
+  Mesh *mesh = BKE_mesh_new_nomain(vert_num, 0, kept_face_num, corner_num);
 
   /* Write vertex positions (transformed). */
   MutableSpan<float3> positions = mesh->vert_positions_for_write();
@@ -166,10 +218,10 @@ static Mesh *create_mesh_data(const PMXModel &model, const PMXImportParams &para
   /* Swapping PMX Y/Z is a reflection, so reverse every triangle to preserve
    * its outward-facing winding in Blender space. */
   MutableSpan<int> corner_verts = mesh->corner_verts_for_write();
-  for (const int face : IndexRange(face_num)) {
+  for (const int kept : IndexRange(kept_face_num)) {
+    const int face = kept_faces[kept];
     for (const int corner : IndexRange(3)) {
-      const int corner_index = face * 3 + corner;
-      corner_verts[corner_index] = model.face_indices[face * 3 + (2 - corner)];
+      corner_verts[kept * 3 + corner] = model.face_indices[face * 3 + (2 - corner)];
     }
   }
 
@@ -185,9 +237,9 @@ static Mesh *create_mesh_data(const PMXModel &model, const PMXImportParams &para
     bke::SpanAttributeWriter<float2> uv_map = attributes.lookup_or_add_for_write_only_span<float2>(
         "UVMap", bke::AttrDomain::Corner);
 
-    for (int face_i = 0; face_i < face_num; face_i++) {
+    for (int kept = 0; kept < kept_face_num; kept++) {
       for (int j = 0; j < 3; j++) {
-        int corner_idx = face_i * 3 + j;
+        int corner_idx = kept * 3 + j;
         int vert_idx = corner_verts[corner_idx];
         uv_map.span[corner_idx][0] = model.vertices[vert_idx].uv[0];
         uv_map.span[corner_idx][1] = 1.0f - model.vertices[vert_idx].uv[1];
@@ -198,12 +250,9 @@ static Mesh *create_mesh_data(const PMXModel &model, const PMXImportParams &para
     mesh->uv_maps_default_set("UVMap");
   }
 
-  /* Assign material indices per face. */
-  bke::MutableAttributeAccessor attributes = mesh->attributes_for_write();
-  bke::SpanAttributeWriter<int> material_indices =
-      attributes.lookup_or_add_for_write_only_span<int>("material_index",
-                                                        bke::AttrDomain::Face);
-
+  /* Resolve the material index of every original face first, so that skipping
+   * degenerate faces does not shift the per-material face ranges. */
+  Vector<int> face_material(face_num);
   int face_offset = 0;
   for (int mat_i = 0; mat_i < int(model.materials.size()); mat_i++) {
     const int face_vertex_count = model.materials[mat_i].face_vertex_count;
@@ -215,11 +264,20 @@ static Mesh *create_mesh_data(const PMXModel &model, const PMXImportParams &para
       throw std::runtime_error("PMX material face ranges exceed mesh face count");
     }
     for (int j = 0; j < face_count; j++) {
-      material_indices.span[face_offset++] = mat_i;
+      face_material[face_offset++] = mat_i;
     }
   }
   if (face_offset != face_num) {
     throw std::runtime_error("PMX material face ranges do not cover mesh face count");
+  }
+
+  /* Assign material indices per kept face. */
+  bke::MutableAttributeAccessor attributes = mesh->attributes_for_write();
+  bke::SpanAttributeWriter<int> material_indices =
+      attributes.lookup_or_add_for_write_only_span<int>("material_index",
+                                                        bke::AttrDomain::Face);
+  for (const int kept : IndexRange(kept_face_num)) {
+    material_indices.span[kept] = face_material[kept_faces[kept]];
   }
   material_indices.finish();
 
@@ -297,7 +355,7 @@ void create_mesh_object(PMXImportContext &ctx, PMXModel &model)
 
   if (!params.split_by_material) {
     /* Single mesh (all materials combined). */
-    Mesh *mesh = create_mesh_data(model, params);
+    Mesh *mesh = create_mesh_data(model, params, ctx.reports);
     Mesh *mesh_in_main = BKE_mesh_add(bmain, base_name);
     BKE_mesh_nomain_to_mesh(mesh, mesh_in_main, nullptr);
 
@@ -393,7 +451,7 @@ void create_mesh_object(PMXImportContext &ctx, PMXModel &model)
       if (mat_name.empty()) mat_name = "Material" + std::to_string(mat_i);
       std::string obj_name = std::string(base_name) + "_" + mat_name;
 
-      Mesh *mesh = create_mesh_data(sub_model, params);
+      Mesh *mesh = create_mesh_data(sub_model, params, ctx.reports);
       Mesh *mesh_in_main = BKE_mesh_add(bmain, obj_name.c_str());
       BKE_mesh_nomain_to_mesh(mesh, mesh_in_main, nullptr);
 

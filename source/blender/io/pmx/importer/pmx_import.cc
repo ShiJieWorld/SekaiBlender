@@ -280,6 +280,9 @@ void importer_main(bContext *C, PMXImportParams &params)
       for (const std::string &error : physics_result.errors) {
         BKE_reportf(CTX_wm_reports(C), RPT_WARNING, "PMX physics definition: %s", error.c_str());
       }
+      for (const std::string &warning : physics_result.warnings) {
+        BKE_reportf(CTX_wm_reports(C), RPT_WARNING, "PMX physics definition: %s", warning.c_str());
+      }
       if (physics_result.success() && ctx.model_collection) {
         if (mmd_physics::serialize_physics_definition(
                 *ctx.model_collection, physics_result.definition, CTX_wm_reports(C)))

@@ -496,13 +496,9 @@ Material *create_pmx_material(PMXImportContext &ctx, const PMXModel &model, cons
                                                         "sphere") :
                                            nullptr;
   build_pmx_principled_tree(*material, pmx_material, base_texture, sphere_texture);
-  /* Node trees built programmatically need an update pass before their first
-   * depsgraph/GPU evaluation: socket types, availability and node instance
-   * data are produced there. Without it the first render samples an
-   * incomplete shader and falls back to black; a .blend reload hides the bug
-   * because node_tree_update_all_new() runs while reading the file. This
-   * mirrors what the OBJ importer does after building a material tree. */
   if (material->nodetree != nullptr) {
+    /* Compile the shader before the viewport's first redraw; otherwise imported
+     * materials can stay black until a node editor triggers an update. */
     BKE_ntree_update_after_single_tree_change(*ctx.bmain, *material->nodetree);
   }
 

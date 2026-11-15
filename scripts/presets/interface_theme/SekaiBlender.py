@@ -28,6 +28,7 @@ for widget_name in (
     "wcol_menu",
     "wcol_menu_back",
     "wcol_menu_item",
+    "wcol_pie_menu",
     "wcol_tooltip",
     "wcol_progress",
     "wcol_list_item",
@@ -38,4 +39,4 @@ ui.wcol_num.item = accent_light
 ui.wcol_numslider.item = accent_light
 ui.wcol_progress.item = accent_light
 ui.panel_active = accent
-theme.common.anim.playhead = accent_light[:3]
+theme.common.anim.playhead = accent_light
