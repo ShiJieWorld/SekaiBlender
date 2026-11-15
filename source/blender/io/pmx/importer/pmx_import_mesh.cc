@@ -369,7 +369,6 @@ void create_mesh_object(PMXImportContext &ctx, PMXModel &model)
       BKE_view_layer_base_select_and_set_active(ctx.view_layer, base);
     }
 
-    ctx.mesh_obj = obj;
     parent_keep_world_transform(obj, ctx.root_obj);
     ctx.mesh_objects.append(obj);
     assign_pmx_materials(ctx, model, obj);
@@ -472,20 +471,6 @@ void create_mesh_object(PMXImportContext &ctx, PMXModel &model)
       parent_keep_world_transform(obj, ctx.root_obj);
       mesh_objects.append(obj);
       ctx.mesh_objects.append(obj);
-    }
-
-    ctx.mesh_obj = ctx.root_obj;
-  }
-
-  if (!ctx.mesh_obj) {
-    /* Fallback: find first mesh object. */
-    Object *ob = static_cast<Object *>(bmain->objects.first());
-    while (ob) {
-      if (ob->type == OB_MESH) {
-        ctx.mesh_obj = ob;
-        break;
-      }
-      ob = static_cast<Object *>(ob->id.next);
     }
   }
 

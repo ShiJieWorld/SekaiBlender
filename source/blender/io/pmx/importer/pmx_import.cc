@@ -178,7 +178,6 @@ void report_physics_mapping(const mmd_physics::MMDPhysicsDefinition &definition,
 void importer_main(bContext *C, PMXImportParams &params)
 {
   Main *bmain = CTX_data_main(C);
-  Scene *scene = CTX_data_scene(C);
   ViewLayer *view_layer = CTX_data_view_layer(C);
 
   if (!BLI_exists(params.filepath)) {
@@ -199,10 +198,8 @@ void importer_main(bContext *C, PMXImportParams &params)
   /* Set up import context. */
   PMXImportContext ctx;
   ctx.bmain = bmain;
-  ctx.scene = scene;
   ctx.view_layer = view_layer;
   ctx.params = &params;
-  ctx.mesh_obj = nullptr;
   ctx.root_obj = nullptr;
   ctx.armature_obj = nullptr;
   ctx.morph_controller_obj = nullptr;

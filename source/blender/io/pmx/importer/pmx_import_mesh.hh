@@ -56,9 +56,7 @@ struct PMXMaterialImportReport {
 
 struct PMXImportContext {
   Main *bmain = nullptr;
-  Scene *scene = nullptr;
   ViewLayer *view_layer = nullptr;
-  Object *mesh_obj = nullptr;              /**< Primary mesh object (legacy). */
   Object *root_obj = nullptr;              /**< Unified PMX model root Empty. */
   Collection *model_collection = nullptr;   /**< Collection containing this PMX import. */
   Collection *geometry_collection = nullptr; /**< Child collection for imported Mesh objects. */
@@ -83,7 +81,7 @@ struct PMXImportContext {
 
 /**
  * Create mesh objects and materials from a parsed PMXModel.
- * Populates ctx.mesh_obj, ctx.mesh_objects, and ctx.sub_meshes (split mode only).
+ * Populates ctx.mesh_objects and ctx.sub_meshes (split mode only).
  * Parents all created Mesh objects to ctx.root_obj.
  * Does NOT assign vertex weights — that is done after armature creation.
  */

@@ -63,12 +63,6 @@ static bool g_options_written = false;
 /* Number of frames captured in the current session. */
 static int g_frame_count = 0;
 
-/* GPU resources (lazily initialized). */
-static gpu::Shader *g_luma_shader = nullptr;
-static gpu::Shader *g_sample_shader = nullptr;
-static gpu::Texture *g_sample_readback_tex = nullptr;
-static bool g_resources_valid = false;
-
 /** \} */
 
 /* -------------------------------------------------------------------- */
@@ -196,35 +190,6 @@ static uint64_t timestamp_us()
 /** \name GPU Resource Management
  * \{ */
 
-/**
- * Initialize GPU resources for diagnostic capture.
- * Creates compute shaders (luma reduction, pixel sampling) lazily.
- */
-static void ensure_gpu_resources()
-{
-  if (g_resources_valid) {
-    return;
-  }
-
-  /* TODO: Create compute shaders using GPU_shader_create_from_info().
-   * For now, mark resources as valid to avoid repeated attempts.
-   * Full shader creation happens when the GLSL files are integrated
-   * into Blender's shader build system.
-   */
-  g_resources_valid = true;
-}
-
-/**
- * Free GPU resources.
- */
-static void free_gpu_resources()
-{
-  GPU_SHADER_FREE_SAFE(g_luma_shader);
-  GPU_SHADER_FREE_SAFE(g_sample_shader);
-  GPU_TEXTURE_FREE_SAFE(g_sample_readback_tex);
-  g_resources_valid = false;
-}
-
 /** \} */
 
 /* -------------------------------------------------------------------- */
@@ -251,8 +216,10 @@ static std::string collect_status(gpu::Texture *output_tex,
            "\"output_texture_valid\":%s,"
            "\"intermediate_texture_valid\":%s"
            "}",
-           g_luma_shader != nullptr ? "true" : "false",   /* Placeholder: EASU shader */
-           g_luma_shader != nullptr ? "true" : "false",    /* Placeholder: RCAS shader */
+           /* Shader-validity probing was never implemented; report the
+            * observed constant so the JSONL schema stays stable. */
+           "false",
+           "false",
            "true",                                          /* Input tex always valid when called */
            output_tex != nullptr ? "true" : "false",
            intermediate_tex != nullptr ? "true" : "false");
@@ -406,7 +373,6 @@ void FSR_diagnostics_init()
 void FSR_diagnostics_free()
 {
   close_jsonl();
-  free_gpu_resources();
 }
 
 void FSR_diagnostics_capture(gpu::Texture *output_texture,
@@ -433,9 +399,6 @@ void FSR_diagnostics_capture(gpu::Texture *output_texture,
   if (!open_jsonl()) {
     return;
   }
-
-  /* Ensure GPU resources are ready. */
-  ensure_gpu_resources();
 
   /* Write options header on first capture. */
   write_options_header();
@@ -490,36 +453,12 @@ void FSR_diagnostics_capture(gpu::Texture *output_texture,
   g_frame_count++;
 }
 
-void FSR_diagnostics_flush()
-{
-  close_jsonl();
-}
-
-void FSR_diagnostics_reset()
-{
-  close_jsonl();
-  g_frame_count = 0;
-  g_options_written = false;
-}
-
 void FSR_diagnostics_enable(bool enable)
 {
   g_enabled = enable;
   if (!enable) {
     close_jsonl();
   }
-}
-
-void FSR_diagnostics_set_interval(int interval)
-{
-  g_capture_interval = std::max(1, interval);
-  g_capture_counter = g_capture_interval;
-}
-
-void FSR_diagnostics_set_pixel_grid(int cols, int rows)
-{
-  g_sample_cols = std::max(4, std::min(32, cols));
-  g_sample_rows = std::max(4, std::min(32, rows));
 }
 
 void FSR_diagnostics_set_output_dir(const char *dir)

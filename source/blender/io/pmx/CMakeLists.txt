@@ -49,7 +49,6 @@ set(SRC
   importer/pmx_group_morph.cc
   importer/pmx_import_weights.cc
   importer/pmx_source_data.cc
-  intern/pmx_model_diff.cc
   intern/pmx_reader.cc
   intern/pmx_writer.cc
 
@@ -68,7 +67,6 @@ set(SRC
   importer/pmx_group_morph.hh
   importer/pmx_import_weights.hh
   importer/pmx_source_data.hh
-  intern/pmx_model_diff.h
   intern/pmx_reader.h
   intern/pmx_types.h
   intern/pmx_writer.h
@@ -109,6 +107,8 @@ if(WITH_GTESTS)
     tests/pmx_pose_snapshot_test.cc
     tests/pmx_import_weights_test.cc
     tests/pmx_material_overlap_test.cc
+    intern/pmx_model_diff.cc
+    intern/pmx_model_diff.h
     tests/pmx_model_diff_test.cc
     tests/pmx_normal_fidelity_test.cc
     tests/pmx_round_trip_test.cc

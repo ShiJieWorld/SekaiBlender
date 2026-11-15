@@ -64,7 +64,7 @@ class PMXBoneIKTest : public bke::BlenderGTestBase {
   {
     PMXModel model;
     auto add_bone = [&](const char *name, int parent) {
-      PMXBone bone;
+      PMXBone bone{};
       bone.name_local = name;
       bone.parent_index = parent;
       model.bones.push_back(bone);
@@ -80,7 +80,7 @@ class PMXBoneIKTest : public bke::BlenderGTestBase {
     ik.ik_target_index = foot;
     ik.ik_loop_count = 10;
     ik.ik_angle_limit = 1.0f;
-    PMXIKLink link;
+    PMXIKLink link{};
     link.bone_index = ankle;
     link.limit_angle = true;
     link.limit_min[0] = -0.5f;
@@ -91,7 +91,7 @@ class PMXBoneIKTest : public bke::BlenderGTestBase {
     link.limit_max[2] = 0.75f;
     ik.ik_links.push_back(link);
 
-    PMXRigidBody rigid;
+    PMXRigidBody rigid{};
     rigid.bone_index = ankle;
     rigid.physics_type = 2;
     model.rigid_bodies.push_back(rigid);

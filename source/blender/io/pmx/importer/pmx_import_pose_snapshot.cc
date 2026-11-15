@@ -267,46 +267,4 @@ bool read_pose_snapshot(const ID &owner, PMXPoseSnapshot &r_snapshot)
   return r_snapshot.schema_version == kPoseSnapshotSchemaVersion;
 }
 
-bool mmd_pose_done_snapshot_readback(Depsgraph * /*depsgraph*/, ID *id, PMXPoseSnapshot *r_snapshot)
-{
-  if (id == nullptr || r_snapshot == nullptr) {
-    return false;
-  }
-  const IDProperty *props = id->system_properties;
-  if (props == nullptr) {
-    return false;
-  }
-  IDProperty *done = IDP_GetPropertyTypeFromGroup(props, kPoseDoneProperty, IDP_BOOLEAN);
-  if (done == nullptr || !IDP_bool_get(done)) {
-    return false;
-  }
-  return read_pose_snapshot(*id, *r_snapshot);
-}
-
-void mmd_physics_pose_writeback(ID *id, const PMXPoseSnapshot *snapshot)
-{
-  if (id == nullptr || snapshot == nullptr) {
-    return;
-  }
-  Object *ob = reinterpret_cast<Object *>(id);
-  if (ob->type != OB_ARMATURE || ob->pose == nullptr) {
-    return;
-  }
-  for (const PMXPoseBoneSnapshot &bs : snapshot->bones) {
-    bPoseChannel *pchan = BKE_pose_channel_find_name(ob->pose, bs.name.c_str());
-    if (pchan == nullptr) {
-      continue;
-    }
-    pchan->loc[0] = bs.loc[0];
-    pchan->loc[1] = bs.loc[1];
-    pchan->loc[2] = bs.loc[2];
-    pchan->quat[0] = bs.quat[0];
-    pchan->quat[1] = bs.quat[1];
-    pchan->quat[2] = bs.quat[2];
-    pchan->quat[3] = bs.quat[3];
-  }
-  /* Mark the armature for recompute; E is responsible for the actual eval. */
-  DEG_id_tag_update(id, ID_RECALC_GEOMETRY | ID_RECALC_TRANSFORM);
-}
-
 }  // namespace blender::io::pmx

@@ -20,10 +20,6 @@ XIANYU_URL = "https://p.goofish.com/p/8aOe0QKT"
 AFDIAN_URL = "https://afdian.com/a/Sekaiblender"
 GITHUB_URL = "https://github.com/ShiJieWorld/SekaiBlender"
 BILIBILI_URL = "https://b23.tv/59qbW2a"
-# Kept for older call sites that still import the generic name.
-CONTACT_URL = GITHUB_URL
-# Kept for older call sites that still import the generic name.
-SPONSOR_URL = AFDIAN_URL
 # Human-readable roster refresh stamp shown on the splash. Update when names land.
 ROSTER_UPDATED = "2026年11月"
 

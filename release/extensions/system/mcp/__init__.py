@@ -78,13 +78,7 @@ class _State:
 
     @classmethod
     def startup_info_set_from_exception(cls, ex: Exception) -> None:
-        """
-        Store a startup exception message to display in the preferences UI
-        and print the full traceback to stderr for debugging.
-        """
-        # NOTE: this is correct but reads like an unhandled exception.
-        # import traceback
-        # traceback.print_exception(ex)
+        """Store a startup exception message to display in the preferences UI."""
         cls.autostart_error = str(ex)
 
     @classmethod

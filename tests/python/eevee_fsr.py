@@ -96,6 +96,8 @@ class EeveeFsrTest(unittest.TestCase):
                     True,
                     quality=quality,
                 )
+            for quality, pixels in quality_results.items():
+                self.assertGreater(max(pixels[0::4]), 1.0e-5, f'{quality} rendered black')
             for quality_a, quality_b in zip(
                     ('ULTRA_QUALITY', 'QUALITY', 'BALANCED'),
                     ('QUALITY', 'BALANCED', 'PERFORMANCE')):

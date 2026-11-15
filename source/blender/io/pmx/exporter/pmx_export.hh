@@ -61,8 +61,6 @@ struct PMXExportOptions {
  * all zero for a model that was imported and not edited.
  */
 struct PMXExportReport {
-  bool success = false;
-
   int vertex_count = 0;
   int face_count = 0;
   int texture_count = 0;

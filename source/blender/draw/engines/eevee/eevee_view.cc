@@ -247,12 +247,14 @@ void ShadingView::update_view()
     /* Final pixel size on the screen. */
     const float2 pixel_size = render_size / float2(film.film_extent_get());
 
-    /* Render extent in final film pixel unit. */
-    const int2 render_extent = film.render_extent_original_get() * film.scaling_factor_get();
-    const int overscan_pixels = film.render_overscan_get() * film.scaling_factor_get();
+    /* Render extent in final film pixel unit. FSR arbitrary scaling uses
+     * `scaling_factor == 0`, so use the actual render-to-film ratio. */
+    const float render_to_film_scale = 1.0f / film.render_scale_get();
+    const float2 render_extent = float2(film.render_extent_original_get()) * render_to_film_scale;
+    const float overscan_pixels = float(film.render_overscan_get()) * render_to_film_scale;
 
-    const float2 render_bottom_left = bottom_left - pixel_size * float(overscan_pixels);
-    const float2 render_top_right = render_bottom_left + pixel_size * float2(render_extent);
+    const float2 render_bottom_left = bottom_left - pixel_size * overscan_pixels;
+    const float2 render_top_right = render_bottom_left + pixel_size * render_extent;
 
     if (main_view_.is_persp()) {
       winmat = math::projection::perspective(render_bottom_left.x,

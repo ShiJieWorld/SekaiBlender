@@ -121,20 +121,6 @@ static void mmd_ccd_v2_trace_matrix(const char *stage,
                matrix[3][3]);
 }
 
-static void mmd_ccd_v2_trace_vec3(const char *stage, const char *bone_name, const float value[3])
-{
-  if (!mmd_ccd_v2_trace_enabled()) {
-    return;
-  }
-  std::fprintf(stderr,
-               "[MMD CCD V2] stage=%s bone=%s vec=(% .7g,% .7g,% .7g)\n",
-               stage,
-               bone_name != nullptr ? bone_name : "<null>",
-               value[0],
-               value[1],
-               value[2]);
-}
-
 static void mmd_ccd_v2_trace_quat(const char *stage, const char *bone_name, const float value[4])
 {
   if (!mmd_ccd_v2_trace_enabled()) {

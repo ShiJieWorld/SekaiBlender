@@ -69,31 +69,9 @@ void FSR_diagnostics_capture(gpu::Texture *output_texture,
                              int frame_number);
 
 /**
- * Flush buffered diagnostic data to the JSONL file.
- * Called at diagnostic stop or session end.
- */
-void FSR_diagnostics_flush();
-
-/**
- * Reset all diagnostic state (called on Stop).
- */
-void FSR_diagnostics_reset();
-
-/**
  * Enable/disable diagnostic capture.
  */
 void FSR_diagnostics_enable(bool enable);
-
-/**
- * Set the capture interval (number of frames between captures).
- * Only affects viewport mode.
- */
-void FSR_diagnostics_set_interval(int interval);
-
-/**
- * Set the sparse pixel sampling grid dimensions.
- */
-void FSR_diagnostics_set_pixel_grid(int cols, int rows);
 
 /**
  * Set the output directory for JSONL files.

@@ -259,9 +259,6 @@ class MMDPhysicsWorld {
   /** Snap every body back to its initial transform and clear all velocities. */
   void reset();
 
-  /** Snap every bone-bound body to the currently evaluated pose and clear velocities. */
-  void reset_to_current_pose();
-
   /* --- F2: bone <-> body synchronization ----------------------------- */
 
   /**
@@ -335,7 +332,7 @@ class MMDPhysicsWorld {
    *
    * \return total number of sub-steps Bullet actually executed.
    */
-  int prewarm(int steps, float timestep, int max_substeps);
+  int prewarm(int steps, float timestep);
 
   /**
    * Gradually interpolate kinematic (STATIC) bodies from PMX rest pose to the
@@ -426,19 +423,6 @@ class MMDPhysicsWorld {
 
   /** Return whether the Blender data bound at initialize time is still live. */
   bool is_binding_valid(Main *current_bmain) const;
-
-  /** Read a body's current Blender Z-up world transform. \return false if out of range. */
-  bool get_body_transform(int body_index, float r_position[3], float r_rotation[4]) const;
-
-  /**
-   * Manually override a body's Blender Z-up world transform (clears velocities).
-   * Useful for tests and for F2's kinematic-sync path. \return false if out
-   * of range.
-   */
-  bool set_body_transform(int body_index, const float position[3], const float rotation[4]);
-
-  /** Look up a body's PMX index from its Blender bone name (0 if not bound). */
-  int find_body_index_by_bone_name(const std::string &bone_name) const;
 
   const MMDPhysicsPerformance &performance() const;
 

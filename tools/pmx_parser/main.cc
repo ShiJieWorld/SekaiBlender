@@ -26,6 +26,7 @@ void dump_model_info(const PMXModel& model) {
            model.header.bone_idx_size,
            model.header.morph_idx_size,
            model.header.rigid_idx_size);
+    printf("  Parse end:      %zu / %zu bytes\n", model.parse_end_offset, model.file_size);
     printf("\n");
 
     // Model Info

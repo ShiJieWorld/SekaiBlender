@@ -242,8 +242,6 @@ TEST_F(PMXPoseSnapshotTest, ReadMissingReturnsFalse)
 {
   PMXPoseSnapshot snap;
   EXPECT_FALSE(read_pose_snapshot(armature_object->id, snap));
-  /* Readback also refuses when no POSE_DONE gate is set. */
-  EXPECT_FALSE(mmd_pose_done_snapshot_readback(nullptr, &armature_object->id, &snap));
 }
 
 TEST_F(PMXPoseSnapshotTest, ReadbackFillsStruct)
@@ -262,7 +260,7 @@ TEST_F(PMXPoseSnapshotTest, ReadbackFillsStruct)
   mmd_capture_pose_snapshot(armature_object, &reports);
 
   PMXPoseSnapshot snap;
-  ASSERT_TRUE(mmd_pose_done_snapshot_readback(nullptr, &armature_object->id, &snap));
+  ASSERT_TRUE(read_pose_snapshot(armature_object->id, snap));
   EXPECT_EQ(snap.bone_count, 2);
   ASSERT_EQ(snap.bones.size(), 2);
   /* captured_at_frame is informational; just verify it round-trips as set (0). */
@@ -278,39 +276,6 @@ TEST_F(PMXPoseSnapshotTest, ReadbackFillsStruct)
   EXPECT_TRUE(ap->has_append);
   EXPECT_FLOAT_EQ(ik->loc[0], 0.5f);
   EXPECT_FLOAT_EQ(ap->loc[1], 0.5f);
-}
-
-TEST_F(PMXPoseSnapshotTest, WritebackSetsChannels)
-{
-  add_bone("Root");
-  ensure_pose();
-
-  const float mat[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
-  set_channel("Root", mat, {1.0f, 2.0f, 3.0f}, {0.5f, 0.5f, 0.5f, 0.5f});
-
-  mmd_capture_pose_snapshot(armature_object, &reports);
-
-  PMXPoseSnapshot snap;
-  ASSERT_TRUE(read_pose_snapshot(armature_object->id, snap));
-
-  /* Mutate the live channel away from the snapshot. */
-  bPoseChannel *pchan = BKE_pose_channel_find_name(armature_object->pose, "Root");
-  ASSERT_NE(pchan, nullptr);
-  pchan->loc[0] = 9.0f;
-  pchan->loc[1] = 9.0f;
-  pchan->loc[2] = 9.0f;
-  pchan->quat[0] = 0.0f;
-  pchan->quat[3] = 1.0f;
-
-  /* DEG_id_tag_update uses G.main; set it for the duration of writeback. */
-  G_MAIN = bmain;
-  mmd_physics_pose_writeback(&armature_object->id, &snap);
-  G_MAIN = nullptr;
-
-  EXPECT_FLOAT_EQ(pchan->loc[0], 1.0f);
-  EXPECT_FLOAT_EQ(pchan->loc[2], 3.0f);
-  EXPECT_FLOAT_EQ(pchan->quat[0], 0.5f);
-  EXPECT_FLOAT_EQ(pchan->quat[3], 0.5f);
 }
 
 }  // namespace

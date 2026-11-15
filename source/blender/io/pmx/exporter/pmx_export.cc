@@ -1393,7 +1393,6 @@ bool export_pmx_model(Collection &model_root,
     return false;
   }
 
-  r_report.success = true;
   return true;
 }
 

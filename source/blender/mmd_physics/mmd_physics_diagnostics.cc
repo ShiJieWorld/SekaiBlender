@@ -1109,8 +1109,7 @@ MMDDiagnosticCaptureResult capture_mmd_physics_diagnostics(
    * probes of individual prewarm stages. The production-equivalent default
    * is two 1/30 s frames. */
   constexpr float startup_timestep = 1.0f / 30.0f;
-  constexpr int startup_max_substeps = 8;
-  world.prewarm(options.startup_prewarm_steps, startup_timestep, startup_max_substeps);
+  world.prewarm(options.startup_prewarm_steps, startup_timestep);
 
   const std::string jsonl_temp_path = result.jsonl_path + ".tmp";
   const std::string summary_temp_path = result.summary_path + ".tmp";

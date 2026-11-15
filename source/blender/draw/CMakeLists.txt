@@ -678,8 +678,6 @@ set(SHADER_SRC_IMAGE
 
   engines/image/image_shader_shared.hh
 
-  shaders/fsr_luma_reduce_comp.glsl
-  shaders/fsr_pixel_sample_comp.glsl
   shaders/fsr_easu_comp.glsl
   shaders/fsr_rcas_comp.glsl
 )

@@ -1988,7 +1988,7 @@ PhysicsStartupResult prepare_world_for_simulation(MMDPhysicsRuntimeSession &sess
   if (const char *env = std::getenv("MMD_RT_PREWARM_STEPS")) {
     prewarm_substeps = std::clamp(std::atoi(env), 0, 60);
   }
-  world.prewarm(prewarm_substeps, kDefaultTimerInterval, kDefaultMaxSubsteps);
+  world.prewarm(prewarm_substeps, kDefaultTimerInterval);
   result.prewarm_substeps = prewarm_substeps;
   return result;
 }

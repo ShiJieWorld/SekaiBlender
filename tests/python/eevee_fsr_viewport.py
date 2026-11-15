@@ -52,11 +52,18 @@ def run():
 
         with tempfile.TemporaryDirectory() as directory:
             native = render_viewport(directory, 'viewport_native', False)
-            fsr = render_viewport(directory, 'viewport_fsr', True, 0.2, 'PERFORMANCE')
-            quality = render_viewport(directory, 'viewport_quality', True, 0.2, 'QUALITY')
+            preset_pixels = {}
+            for preset in ('ULTRA_QUALITY', 'QUALITY', 'BALANCED', 'PERFORMANCE'):
+                preset_pixels[preset] = render_viewport(
+                    directory, 'viewport_' + preset.lower(), True, 0.2, preset)
+            fsr = preset_pixels['PERFORMANCE']
+            quality = preset_pixels['QUALITY']
             unsharpened = render_viewport(directory, 'viewport_unsharpened', True, 0.0)
             sharpened = render_viewport(directory, 'viewport_sharpened', True, 1.0)
 
+        for preset, pixels in preset_pixels.items():
+            if max(pixels[0::4]) <= 1.0e-5:
+                raise AssertionError(f'Viewport {preset} preset rendered black')
         error = sum(abs(a - b) for a, b in zip(native, fsr)) / len(fsr)
         if not 1.0e-6 < error < 0.3:
             raise AssertionError(f'Unexpected viewport mean absolute error: {error}')

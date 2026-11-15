@@ -65,21 +65,4 @@ void mmd_capture_pose_snapshot(Object *armature, ReportList *reports);
  */
 bool read_pose_snapshot(const ID &owner, PMXPoseSnapshot &r_snapshot);
 
-/**
- * D/E contract (read side): fill `r_snapshot` from the armature's
- * `mmd_pose_snapshot`. Returns true only when the snapshot exists AND
- * `mmd_pose_done == true` (E must refuse to start physics otherwise — red
- * line 88/139). The `depsgraph` parameter is accepted for interface shape
- * compatibility and is unused (reading system_properties needs no eval).
- */
-bool mmd_pose_done_snapshot_readback(Depsgraph *depsgraph, ID *id, PMXPoseSnapshot *r_snapshot);
-
-/**
- * D/E contract (write side): write the solved bone channels from `snapshot`
- * back onto the armature's pose channels (`loc` / `quat`) and tag the
- * depsgraph for recompute. `snapshot` must originate from the same armature
- * (bone names match). D4 does not run physics — this is the seam E plugs into.
- */
-void mmd_physics_pose_writeback(ID *id, const PMXPoseSnapshot *snapshot);
-
 }  // namespace blender::io::pmx

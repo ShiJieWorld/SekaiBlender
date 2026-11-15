@@ -210,6 +210,12 @@ class Film {
     return data_.scaling_factor;
   }
 
+  /** Ratio of render pixels to final film pixels (1.0 for native resolution). */
+  float render_scale_get() const
+  {
+    return render_scale_;
+  }
+
   bool use_scaled_resolution_get() const
   {
     return data_.scaling_factor != 1;

@@ -63,7 +63,7 @@ class PMXBoneAppendTest : public bke::BlenderGTestBase {
   {
     PMXModel model;
     auto add_bone = [&](const char *name, int parent) {
-      PMXBone bone;
+      PMXBone bone{};
       bone.name_local = name;
       bone.parent_index = parent;
       model.bones.push_back(bone);

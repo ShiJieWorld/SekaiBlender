@@ -93,7 +93,7 @@ class PMXBoneAxisTest : public bke::BlenderGTestBase {
   {
     PMXModel model;
     auto add = [&](const char *name) {
-      PMXBone bone;
+      PMXBone bone{};
       bone.name_local = name;
       model.bones.push_back(bone);
       return int(model.bones.size()) - 1;

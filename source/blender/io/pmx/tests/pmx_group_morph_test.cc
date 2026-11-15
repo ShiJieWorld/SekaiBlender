@@ -19,7 +19,7 @@ namespace {
 
 static PMXMorph make_morph(const MorphType type, const char *name)
 {
-  PMXMorph morph;
+  PMXMorph morph{};
   morph.type = type;
   morph.name_local = name;
   return morph;

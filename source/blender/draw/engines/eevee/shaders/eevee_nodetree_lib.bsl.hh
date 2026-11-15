@@ -861,7 +861,13 @@ float texture_lod_bias_get(KernelGlobals &kg)
 float derivative_scale_get(KernelGlobals &kg)
 {
   const eevee::Uniform &uni = kg.uniforms;
-  return 1.0f / float(uni.uniform_buf.film.scaling_factor);
+  if (uni.uniform_buf.film.scaling_factor != 0) {
+    return 1.0f / float(uni.uniform_buf.film.scaling_factor);
+  }
+  int2 render_extent = uni.uniform_buf.film.render_extent -
+                       int2(uni.uniform_buf.film.overscan * 2);
+  float2 scale = float2(render_extent) / float2(uni.uniform_buf.film.extent);
+  return min(scale.x, scale.y);
 }
 
 /** \} */

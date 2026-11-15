@@ -458,10 +458,6 @@ btRigidBody *MMDPhysicsWorld::create_rigid_body_(const MMDRigidBodyDefinition &d
 
 btGeneric6DofSpringConstraint *MMDPhysicsWorld::create_joint_(const MMDJointDefinition &def)
 {
-  if (std::getenv("MMD_RT_DISABLE_JOINT_515") != nullptr && def.pmx_index == 515) {
-    fprintf(stderr, "[MMD Physics] Diagnostic: disabled PMX joint 515\n");
-    return nullptr;
-  }
   if (def.rigid_a_index < 0 || def.rigid_a_index >= int(body_runtimes_.size()) ||
       def.rigid_b_index < 0 || def.rigid_b_index >= int(body_runtimes_.size()))
   {
@@ -817,28 +813,6 @@ void MMDPhysicsWorld::reset()
   has_prev_prev_kinematic_ = false;
 }
 
-void MMDPhysicsWorld::reset_to_current_pose()
-{
-  if (!initialized_ || dynamics_world_ == nullptr) {
-    return;
-  }
-
-  reset();
-  for (const int i : body_runtimes_.index_range()) {
-    snap_body_to_bone_pose_(i);
-  }
-  temporal_kinematic_init();
-
-  for (const int i : body_runtimes_.index_range()) {
-    const btTransform transform = body_runtimes_[i].body->getWorldTransform();
-    last_kinematic_transforms_[i] = transform;
-    prev_prev_kinematic_transforms_[i] = transform;
-    current_kinematic_targets_[i] = transform;
-  }
-  has_last_kinematic_ = true;
-  has_prev_prev_kinematic_ = false;
-}
-
 void MMDPhysicsWorld::destroy(const bool restore_initial)
 {
   if (restore_initial && initialized_) {
@@ -959,72 +933,6 @@ bool MMDPhysicsWorld::is_binding_valid(Main *current_bmain) const
     }
   }
   return true;
-}
-
-bool MMDPhysicsWorld::get_body_transform(const int body_index,
-                                         float r_position[3],
-                                         float r_rotation[4]) const
-{
-  if (body_index < 0 || body_index >= int(body_runtimes_.size())) {
-    return false;
-  }
-  const btRigidBody &body = *body_runtimes_[body_index].body;
-  btTransform transform;
-  if (body.getMotionState() != nullptr) {
-    body.getMotionState()->getWorldTransform(transform);
-  }
-  else {
-    transform = body.getWorldTransform();
-  }
-  const btVector3 &origin = transform.getOrigin();
-  const btQuaternion &rot = transform.getRotation();
-  r_position[0] = float(origin.x());
-  r_position[1] = float(origin.y());
-  r_position[2] = float(origin.z());
-  r_rotation[0] = float(rot.x());
-  r_rotation[1] = float(rot.y());
-  r_rotation[2] = float(rot.z());
-  r_rotation[3] = float(rot.w());
-  return true;
-}
-
-bool MMDPhysicsWorld::set_body_transform(const int body_index,
-                                         const float position[3],
-                                         const float rotation[4])
-{
-  if (body_index < 0 || body_index >= int(body_runtimes_.size())) {
-    return false;
-  }
-  btRigidBody &body = *body_runtimes_[body_index].body;
-  btTransform transform;
-  transform.setIdentity();
-  transform.setOrigin(btVector3(btScalar(position[0]),
-                                btScalar(position[1]),
-                                btScalar(position[2])));
-  transform.setRotation(btQuaternion(btScalar(rotation[0]),
-                                     btScalar(rotation[1]),
-                                     btScalar(rotation[2]),
-                                     btScalar(rotation[3])));
-  body.setWorldTransform(transform);
-  body.setInterpolationWorldTransform(transform);
-  if (body.getMotionState() != nullptr) {
-    body.getMotionState()->setWorldTransform(transform);
-  }
-  body.clearForces();
-  body.setLinearVelocity(btVector3(0, 0, 0));
-  body.setAngularVelocity(btVector3(0, 0, 0));
-  body.activate(true);
-  return true;
-}
-
-int MMDPhysicsWorld::find_body_index_by_bone_name(const std::string &bone_name) const
-{
-  for (int i = 0; i < int(body_runtimes_.size()); ++i) {
-    if (body_runtimes_[i].blender_bone_name == bone_name) {
-      return i;
-    }
-  }
-  return -1;
 }
 
 const MMDPhysicsPerformance &MMDPhysicsWorld::performance() const
@@ -2158,7 +2066,7 @@ bool MMDPhysicsWorld::temporal_kinematic_init()
   return true;
 }
 
-int MMDPhysicsWorld::prewarm(const int steps, const float timestep, const int /*max_substeps*/)
+int MMDPhysicsWorld::prewarm(const int steps, const float timestep)
 {
   if (!initialized_ || dynamics_world_ == nullptr || steps <= 0) {
     return 0;
