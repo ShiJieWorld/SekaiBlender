@@ -55,6 +55,7 @@ BRAND_WIDGETS = (
     "wcol_menu",
     "wcol_menu_back",
     "wcol_menu_item",
+    "wcol_pie_menu",
     "wcol_tooltip",
     "wcol_progress",
     "wcol_list_item",
@@ -71,7 +72,8 @@ def apply_default_theme(theme) -> None:
     ui.wcol_progress.item = BRAND_ACCENT_LIGHT
     ui.panel_active = BRAND_ACCENT
     theme.common.anim.playhead = BRAND_ACCENT_LIGHT
-    theme.name = "SekaiBlender"
+    # Keep distinct from the user-selectable "SekaiBlender" preset.
+    theme.name = "SekaiBlender Default"
 
 
 def sorted_sponsors(sort_mode: str, descending: bool = True):

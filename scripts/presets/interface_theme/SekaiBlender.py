@@ -28,6 +28,7 @@ for widget_name in (
     "wcol_menu",
     "wcol_menu_back",
     "wcol_menu_item",
+    "wcol_pie_menu",
     "wcol_tooltip",
     "wcol_progress",
     "wcol_list_item",
