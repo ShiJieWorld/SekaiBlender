@@ -16,6 +16,7 @@
 #include "BKE_material.hh"
 #include "BKE_node.hh"
 #include "BKE_node_legacy_types.hh"
+#include "BKE_node_tree_update.hh"
 #include "BKE_report.hh"
 
 #include "BLI_fileops.hh"
@@ -495,6 +496,15 @@ Material *create_pmx_material(PMXImportContext &ctx, const PMXModel &model, cons
                                                         "sphere") :
                                            nullptr;
   build_pmx_principled_tree(*material, pmx_material, base_texture, sphere_texture);
+  /* Node trees built programmatically need an update pass before their first
+   * depsgraph/GPU evaluation: socket types, availability and node instance
+   * data are produced there. Without it the first render samples an
+   * incomplete shader and falls back to black; a .blend reload hides the bug
+   * because node_tree_update_all_new() runs while reading the file. This
+   * mirrors what the OBJ importer does after building a material tree. */
+  if (material->nodetree != nullptr) {
+    BKE_ntree_update_after_single_tree_change(*ctx.bmain, *material->nodetree);
+  }
 
   ctx.material_cache.add(material_index, material);
   ctx.material_report.materials_created++;

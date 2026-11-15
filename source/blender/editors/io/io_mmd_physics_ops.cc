@@ -814,7 +814,13 @@ void trace_playback_edge(MMDPhysicsRuntimeSession &session,
   fflush(stderr);
 }
 
-constexpr float kDefaultGravity[3] = {0.0f, 0.0f, -9.81f};
+/* MMD's world gravity in PMX units is -9.8 * 10 = -98 units/s² (PmxStudio
+ * uses the same value). Converted with the import scale s (0.08 m/unit):
+ *   g = -98 * 0.08 = -7.84 m/s².
+ * This keeps g/L identical to the PMX-native unit system. Using Earth's
+ * -9.81 m/s² here would imply -122.6 units/s², i.e. 25% stronger than MMD. */
+constexpr float kMmdGravityPmx = -98.0f;
+constexpr float kDefaultUnitScale = 0.08f;
 constexpr int kDefaultSolverIterations = 20;
 constexpr int kDefaultDynamicConstraintIterations = 80;
 constexpr int kMaxRealtimeDynamicConstraintIterations = 128;
@@ -1525,10 +1531,15 @@ std::unique_ptr<MMDPhysicsRuntimeSession> create_runtime_session(
     fflush(stderr);
   }
 
+  const float unit_scale = session->binding.definition.coordinate_scale > 0.0f ?
+                               session->binding.definition.coordinate_scale :
+                               kDefaultUnitScale;
+  const float gravity[3] = {0.0f, 0.0f, kMmdGravityPmx * unit_scale};
+
   if (!world->initialize(session->binding.definition,
                          &armature,
                          bmain,
-                         kDefaultGravity,
+                         gravity,
                          runtime_solver_iterations,
                          fixed_step_hz,
                          kDefaultMaxSubsteps,
