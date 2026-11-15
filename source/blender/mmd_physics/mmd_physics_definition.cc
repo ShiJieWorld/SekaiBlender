@@ -46,6 +46,17 @@ void add_error(MMDPhysicsBuildResult &result,
   result.definition.validation.total_errors++;
 }
 
+void add_warning(MMDPhysicsBuildResult &result,
+                 const char *section,
+                 const int index,
+                 const char *field,
+                 const std::string &detail)
+{
+  std::ostringstream message;
+  message << section << "[" << index << "]." << field << ": " << detail;
+  result.warnings.push_back(message.str());
+}
+
 bool check_finite_vec3(MMDPhysicsBuildResult &result,
                         const char *section,
                         const int index,
@@ -103,6 +114,13 @@ bool positive_shape_value(const float value)
 {
   return std::isfinite(value) && value > 0.0f;
 }
+
+/* Minimal Bullet-valid dimension for repaired rigid bodies. 1e-4 m = 0.1 mm in
+ * Blender space (0.00125 MMD cm at the 0.08 import scale): effectively
+ * non-colliding, matching how MMD itself treats zero-size dummy bodies, while
+ * keeping every shape constructor (sphere / box / capsule) inside its valid
+ * input range. */
+constexpr float kMinShapeSize = 1e-4f;
 
 }  // namespace
 
@@ -390,17 +408,25 @@ MMDPhysicsBuildResult build_physics_definition(const PMXModel &model,
     else {
       const int required_axes = rigid.shape_type == 0 ? 1 : 2;
       const int axis_count = rigid.shape_type == 1 ? 3 : required_axes;
+      bool clamped_any = false;
       for (int axis = 0; axis < axis_count; axis++) {
         if (!positive_shape_value(rigid.shape_size[axis])) {
-          add_error(result,
-                    "rigid_bodies",
-                    i,
-                    "shape_size",
-                    rigid.shape_type == 1 ? "box dimensions must be positive and finite" :
-                                            "required dimensions must be positive and finite");
-          rigid_valid = false;
-          break;
+          rigid.shape_size[axis] = kMinShapeSize;
+          clamped_any = true;
         }
+      }
+      if (clamped_any) {
+        /* Zero/negative/non-finite shape dimensions are authoring artifacts in
+         * real distributed models (invisible dummy rigid bodies); MMD itself
+         * tolerates them. Refusing the whole definition for one body left the
+         * entire model without physics (GitHub issue #5). Clamp to a minimal
+         * Bullet-valid size instead and record the original values. */
+        std::ostringstream detail;
+        detail << (rigid.shape_type == 1 ? "box dimensions" : "required dimensions")
+               << " were not positive/finite; clamped to " << kMinShapeSize
+               << " (original PMX shape_size=(" << pmx_rigid.shape_size[0] << ", "
+               << pmx_rigid.shape_size[1] << ", " << pmx_rigid.shape_size[2] << "))";
+        add_warning(result, "rigid_bodies", i, "shape_size", detail.str());
       }
     }
     if (!check_finite_vec3(result, "rigid_bodies", i, "pos", pmx_rigid.pos)) {
