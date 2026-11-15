@@ -957,6 +957,37 @@ TEST_F(PMXSourceDataTest, physics_build_ordered_translation_intervals_stay_limit
   }
 }
 
+TEST_F(PMXSourceDataTest, physics_build_zero_size_rigid_body_is_clamped_not_refused)
+{
+  /* Real distributed models carry invisible dummy rigid bodies with zero or
+   * non-finite shape dimensions (GitHub issue #5: 星穹铁道 ports). One invalid
+   * body used to invalidate the whole definition, leaving the model without
+   * any physics. The build must clamp the dimensions to a Bullet-valid
+   * minimum instead, keep the body, and record the repair as a warning. */
+  PMXModel model;
+  model.name_local = "ZeroSizeTest";
+  model.rigid_bodies.push_back(make_limit_test_rigid("Healthy"));
+
+  PMXRigidBody zero_size = make_limit_test_rigid("ZeroSizeDummy");
+  zero_size.shape_size[0] = 0.0f;
+  model.rigid_bodies.push_back(zero_size);
+
+  blender::mmd_physics::MMDPhysicsBuildResult result =
+      blender::mmd_physics::build_physics_definition(
+          model, blender::Vector<std::string>{}, "ZeroSizeTest", 0.08f);
+
+  ASSERT_TRUE(result.success()) << join_build_errors(result);
+  ASSERT_EQ(result.definition.rigid_bodies.size(), 2);
+  /* The healthy body keeps its scaled size; the dummy gets the minimal size
+   * (1e-4, the documented kMinShapeSize repair value). */
+  EXPECT_NEAR(result.definition.rigid_bodies[0].shape_size[0], 0.08f, 1e-6f);
+  EXPECT_NEAR(result.definition.rigid_bodies[1].shape_size[0], 1e-4f, 1e-9f);
+  ASSERT_EQ(result.warnings.size(), 1);
+  EXPECT_NE(result.warnings[0].find("shape_size"), std::string::npos);
+  /* A repaired body is not an invalid body. */
+  EXPECT_EQ(result.definition.validation.invalid_rigid_bodies, 0);
+}
+
 namespace {
 
 blender::mmd_physics::MMDPhysicsDefinition make_persisted_limit_definition(

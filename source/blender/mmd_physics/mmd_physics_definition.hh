@@ -108,6 +108,10 @@ struct MMDPhysicsDefinition {
 struct MMDPhysicsBuildResult {
   MMDPhysicsDefinition definition;
   std::vector<std::string> errors;
+  /* Objective diagnostics for data that was repaired during the build (e.g.
+   * clamped rigid-body shape dimensions) instead of rejecting the definition.
+   * Warnings never gate success(); errors do. */
+  std::vector<std::string> warnings;
 
   bool success() const
   {
