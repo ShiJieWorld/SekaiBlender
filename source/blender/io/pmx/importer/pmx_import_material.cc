@@ -16,6 +16,7 @@
 #include "BKE_material.hh"
 #include "BKE_node.hh"
 #include "BKE_node_legacy_types.hh"
+#include "BKE_node_tree_update.hh"
 #include "BKE_report.hh"
 
 #include "BLI_fileops.hh"
@@ -495,6 +496,11 @@ Material *create_pmx_material(PMXImportContext &ctx, const PMXModel &model, cons
                                                         "sphere") :
                                            nullptr;
   build_pmx_principled_tree(*material, pmx_material, base_texture, sphere_texture);
+  if (material->nodetree != nullptr) {
+    /* Compile the shader before the viewport's first redraw; otherwise imported
+     * materials can stay black until a node editor triggers an update. */
+    BKE_ntree_update_after_single_tree_change(*ctx.bmain, *material->nodetree);
+  }
 
   ctx.material_cache.add(material_index, material);
   ctx.material_report.materials_created++;
