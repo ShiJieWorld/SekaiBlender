@@ -70,7 +70,7 @@ def register():
             register_class(cls)
 
     from bpy.props import BoolProperty, EnumProperty, FloatProperty, IntProperty, StringProperty
-    from sekaiblender_sponsors import SORT_ITEMS
+    from sekaiblender_sponsors import SORT_ITEMS, apply_default_theme
 
     def _splash_sponsor_sort_update(self, _context):
         self.splash_sponsor_page = 0
@@ -137,6 +137,12 @@ def register():
 
     bone_selection_sets.register()
     copy_global_transform.register()
+
+    prefs = bpy.context.preferences
+    if prefs.themes:
+        theme = prefs.themes[0]
+        if theme.name == "Default" and not theme.filepath:
+            apply_default_theme(theme)
 
 
 def unregister():
