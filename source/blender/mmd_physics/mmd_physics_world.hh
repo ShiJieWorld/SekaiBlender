@@ -670,6 +670,9 @@ class MMDPhysicsWorld {
   /* 0 scans the complete simple chain; positive values cap graph depth. */
   int joint_collision_exclusion_depth_ = 0;
   double fixed_timestep_ = 1.0 / 60.0;
+  /* PMX unit -> Blender meter scale (`MMDPhysicsDefinition::coordinate_scale`).
+   * Used to convert the PMX-unit spring quantities in `create_joint_`. */
+  float coordinate_scale_ = 1.0f;
 
   MMDPhysicsPerformance performance_;
   bool initialized_ = false;

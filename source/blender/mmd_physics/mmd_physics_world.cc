@@ -62,6 +62,18 @@ constexpr uint8_t kShapeCapsule = 2;
 
 constexpr btScalar kMinDynamicMass = btScalar(0.0001);
 
+/* PMX rigid-body mass is used with kg semantics: mass is an independent
+ * dimension, so its exponent under the length rescale is 0. Bullet derives
+ * inertia from the (already scaled) shape and this mass, i.e. I scales as s²
+ * automatically. The quantities that therefore need compensation are the
+ * angular spring stiffness and damping in `create_joint_`.
+ *
+ * Treating PMX mass as "mass per PMX volume" instead (exponent 3) would turn
+ * a 1 kg PMX body into s³ kg (about 0.5 g), and would require scaling every
+ * force-like quantity in lockstep for no change in the dimensionless motion.
+ * Absolute mass interpretability is the reason for keeping exponent 0. */
+constexpr float kPmxMassScale = 1.0f;
+
 bool is_dynamic_type(uint8_t physics_type)
 {
   return physics_type == kPhysicsDynamic || physics_type == kPhysicsDynamicBone;
@@ -203,6 +215,9 @@ bool MMDPhysicsWorld::initialize(const MMDPhysicsDefinition &def,
   solver_iterations_ = std::max(1, std::min(solver_iterations, 128));
   fixed_step_hz_ = std::max(1, fixed_step_hz);
   fixed_timestep_ = 1.0 / double(fixed_step_hz_);
+  coordinate_scale_ = (std::isfinite(def.coordinate_scale) && def.coordinate_scale > 0.0f) ?
+                          def.coordinate_scale :
+                          1.0f;
   max_substeps_ = std::max(1, max_substeps);
   disable_rigid_body_contacts_ = disable_rigid_body_contacts;
   disable_joint_springs_ = disable_joint_springs;
@@ -417,8 +432,9 @@ btRigidBody *MMDPhysicsWorld::create_rigid_body_(const MMDRigidBodyDefinition &d
     diagnostic_mass_floor = std::max(diagnostic_mass_floor,
                                      float(std::strtod(mass_floor_env, nullptr)));
   }
-  const btScalar mass = dynamic ? btScalar(std::max(def.mass, diagnostic_mass_floor)) :
-                                  btScalar(0.0);
+  const btScalar mass = dynamic ?
+                            btScalar(std::max(def.mass * kPmxMassScale, diagnostic_mass_floor)) :
+                            btScalar(0.0);
 
   btVector3 local_inertia(0, 0, 0);
   if (dynamic) {
@@ -513,22 +529,38 @@ btGeneric6DofSpringConstraint *MMDPhysicsWorld::create_joint_(const MMDJointDefi
    * The 0.175 rad rotation in a single 1/120s step is only possible
    * because maxForce=0 disabled the Y-axis limit. */
 
-  /* PMX does not expose spring damping. Bullet 2.82 defines this parameter
-   * in [0, 1], where 1 means no damping. Keep it configurable so objective
-   * diagnostics can isolate the effect without changing any other variable.
-   * Bullet axis mapping: 0,1,2 = linear X/Y/Z; 3,4,5 = angular X/Y/Z. */
+  /* Dimensional conversion for the PMX -> Blender rescale (length ×s,
+   * time ×1, mass ×1). Bullet's 6DOF spring is a velocity motor:
+   *   targetVelocity = fps * damping / iterations * force.
+   *
+   * Linear stiffness k = F/x has dimension M·T⁻², so it is unchanged.
+   * Angular stiffness k = τ/θ has dimension M·L²·T⁻², so it must be ×s²;
+   * this is what keeps k/I invariant, because the inertia Bullet derives
+   * from the scaled shape and unchanged mass is already ×s².
+   *
+   * The damping term is a gain, not a ratio:
+   *   linear  d has dimension L/F = 1/M      -> unchanged;
+   *   angular d has dimension 1/τ = 1/(M·L²) -> ×1/s².
+   * Keeping the base damping at 0.15 and applying the angular 1/s² factor
+   * preserves the spring-inertia response of the PMX-native unit system
+   * instead of masking the mismatch with a blanket damping change. */
+  const btScalar mass_scale = btScalar(kPmxMassScale);
+  const btScalar unit_scale = btScalar(coordinate_scale_);
+  const btScalar unit_scale_sq = unit_scale * unit_scale;
   if (!disable_joint_springs_) {
     for (int axis = 0; axis < 3; ++axis) {
       if (def.spring_translation[axis] > 0.0f) {
         constraint->enableSpring(axis, true);
-        constraint->setStiffness(axis, btScalar(def.spring_translation[axis]));
-        constraint->setDamping(axis, btScalar(joint_spring_damping_));
+        constraint->setStiffness(axis, btScalar(def.spring_translation[axis]) * mass_scale);
+        constraint->setDamping(axis, btScalar(joint_spring_damping_) / mass_scale);
       }
       if (def.spring_rotation[axis] > 0.0f) {
         const int angular_axis = axis + 3;
         constraint->enableSpring(angular_axis, true);
-        constraint->setStiffness(angular_axis, btScalar(def.spring_rotation[axis]));
-        constraint->setDamping(angular_axis, btScalar(joint_spring_damping_));
+        constraint->setStiffness(
+            angular_axis, btScalar(def.spring_rotation[axis]) * mass_scale * unit_scale_sq);
+        constraint->setDamping(
+            angular_axis, btScalar(joint_spring_damping_) / (mass_scale * unit_scale_sq));
       }
     }
   }
@@ -558,6 +590,11 @@ btGeneric6DofSpringConstraint *MMDPhysicsWorld::create_joint_(const MMDJointDefi
    * MMP config.py: joint_stop_erp=0.5, joint_stop_cfm=0.1 (all zones).
    * Locked-translation joints override LINEAR axes to 0.2/0.0002 so the
    * pullback pass can correct anchor drift (project_memory rule). */
+  /* STOP_ERP is dimensionless (fraction of the position error removed per
+   * step). STOP_CFM is Bullet's numerical constraint regularization, not a
+   * physical inverse-inertia: scaling it by 1/s² (the dimensional inverse of
+   * the angular inertia) makes the solver diverge to NaN on jointed hair/
+   * skirt chains, so both are kept at their native values. */
   for (int axis = 0; axis < 6; ++axis) {
     constraint->setParam(BT_CONSTRAINT_STOP_ERP, btScalar(0.5), axis);
     constraint->setParam(BT_CONSTRAINT_STOP_CFM, btScalar(0.1), axis);
